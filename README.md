@@ -29,4 +29,4 @@
 - Клавишный выключатель ручного включения насоса.
 
 ## Гидравлическая схема системы
-![Гидравлическая схема]([Файлы для изготовления устройства/Гидравлическая схема обвязки скважины.png](https://github.com/false-coder/esphome-caisson-controller/blob/main/Файлы%20для%20изготовления%20устройства/Гидравлическая%20схема%20обвязки%20скважины.png))
+![Hydraulic_diagram](https://github.com/false-coder/esphome-caisson-controller/blob/main/device-manufacturing/Hydraulic_diagram.png)
