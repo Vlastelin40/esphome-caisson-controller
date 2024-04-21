@@ -1,0 +1,993 @@
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+logger: 
+  level: DEBUG
+  logs:
+    sensor: ERROR
+    text_sensor: ERROR
+api: 
+  encryption:
+    key: "+UWKDKuESAEjzu9fJsBZqR/Qz29C+RHRhWKWBvvy2nE="
+ota:
+  password: "82245158afec0adb1640dcff68466a4d"
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap: 
+    ssid: "Caisson-Controller"
+    password: "tPQ1EWV6QGnN"
+captive_portal:
+
+substitutions:
+#######################################################################################
+# Настройки
+#######################################################################################
+  max_tank_vloume: '20'           # Максимальный полезный объём ГА в литрах
+  dallas_update_interval: '600s'  # Интервал обновления датчиков температуры
+  leak_interval_wm1: '60'         # Время наполнения ГА в отсутствие расхода, превышение которого инициирует аварию утечки на счетчике воды 1, в секундах
+  leak_interval_wm2: '3600'       # Время равномерного расхода воды, превышение которого инициирует аврию утечки на счётчике воды 2, в секундах  
+  delta_for_filter_fail: '0.4'    # Дельта давления между входом и выходом фильтра для инициации аварии засорения фильтра
+
+globals:
+#######################################################################################
+# Глобальные переменные
+# По умолчанию интервал сохранения переменных во flash-память 1 минута
+# см. https://esphome.io/components/esphome раздел Adjusting flash writes
+#######################################################################################
+  - id: gs_ctrl_mode        # Режим работы автоматики (1 - от данного контроллера, 0 - от внешнего реле давления)
+    type: bool
+    restore_value: yes  
+  - id: gs_init_time        # Время инициализации устройства (флаг для интервала времени при включении питания контроллера)  
+    type: bool  
+  - id: gs_fail_code        # Авария (код ошибки, 0 - нет аварии)  
+    type: int
+    restore_value: yes    
+  - id: gs_manual_heating   # Ручной режим отопления  
+    type: bool  
+    initial_value: 'false'
+  - id: gs_heating_on       # Состояние команды включения отопления
+    type: bool  
+    initial_value: 'false'
+  - id: gs_pump_on          # Состояние команды включения насоса  
+    type: bool  
+    initial_value: 'false'
+  - id: gs_current_tank_vloume  # Текущий объём ГА в литрах
+    type: int
+    initial_value: '0'
+  - id: gs_count_of_pump_starts  # Число включений насоса в час
+    type: int
+    initial_value: '0'
+  - id: gs_pump_operating_time   # Продолжительность работы насоса в час в секундах
+    type: int
+    initial_value: '0'
+  - id: gs_en_pump_fail_ctrl    # Разрешение регулярного контроля сухого хода наоса
+    type: bool
+    initial_value: 'false'
+    ##################################################################################
+    # Счётчики воды
+    ##################################################################################
+  - id: gs_time_ms          # Буферная метка времени для текущих вычислений длительностей импульсов счётчиков воды в миллисекундах
+    type: uint32_t
+    initial_value: '0'
+  - id: gs_time_wm1         # Метка времени включения сигнала счётчика воды 1 в миллисекундах
+    type: uint32_t  
+    initial_value: '0'
+  - id: gs_time_wm2         # Метка времени включения сигнала счётчика воды 2 в миллисекундах
+    type: uint32_t
+    initial_value: '0'
+  - id: gs_total_wm1        # Показания счётчика воды 1 в литрах
+    type: int
+#    restore_value: yes    
+    initial_value: '0'
+  - id: gs_total_wm2        # Показания счётчика воды 2 в литрах
+    type: int
+#    restore_value: yes    
+    initial_value: '0'
+  - id: gs_leak_time_wm1    # Метка времени начала вероятной утечки на счётчике 1 в миллисекундах
+    type: uint32_t
+    initial_value: '0'
+  - id: gs_leak_time_wm2    # Метка времени начала вероятной утечки на счётчике 2 в миллисекундах
+    type: uint32_t
+    initial_value: '0'
+  - id: gs_time_uniform_flow_wm1      # Счётчик времени неизменного потока на счётчике 1 в миллисекундах
+    type: uint32_t
+    initial_value: '0'
+  - id: gs_time_uniform_flow_wm2      # Счётчик времени неизменного потока на счётчике 2 в миллисекундах
+    type: uint32_t
+    initial_value: '0'
+  - id: gs_time_zero_flow_wm1         # Счётчик времени нулевого потока на счётчике 1 в миллисекундах
+    type: uint32_t
+    initial_value: '0'
+  - id: gs_time_zero_flow_wm2         # Счётчик времени нулевого потока на счётчике 2 в миллисекундах
+    type: uint32_t
+    initial_value: '0'
+    ##################################################################################
+    # Отключение контроля утечки воды
+    ##################################################################################
+  - id: gs_no_leak_control              # Отключение контроля утечки воды
+    type: bool
+    initial_value: 'false'
+  - id: gs_time_before_leak_control_on  # Остаток времени до автоматиеского включения контроля утечки после ручного отключения в минутах
+    type: uint32_t
+    initial_value: '0'
+
+esphome:
+#######################################################################################
+# Инициализация системы
+#######################################################################################
+  name: "caisson-controller"
+  friendly_name: "Контроллер кессона"
+  includes:
+    - caisson-controller.functions.h
+  on_boot:
+    then:
+      - lambda:  id(gs_init_time) = true;       # Устанавливаем флаг времени инициализации устройства      
+      - output.turn_on: led_mode                # Проверка всех светодиодов на 1 секунду #
+      - output.turn_on: led_wifi                                                         #
+      - output.turn_on: led_pump_on                                                      #
+      - output.turn_on: led_pump_check                                                   #
+      - output.turn_on: led_heater                                                       #
+      - output.turn_on: led_fail                                                         #
+      - delay: 1s                                                                        #
+      - output.turn_off: led_mode                                                        #
+      - output.turn_off: led_wifi                                                        #
+      - output.turn_off: led_pump_on                                                     #
+      - output.turn_off: led_pump_check                                                  #
+      - output.turn_off: led_heater                                                      #
+      - output.turn_off: led_fail                                                        #
+      - delay: 1s                                                                        #
+      - script.execute: set_ctrl_mode           # Синхронизация состояния "Режим автоматики" при запуске    
+      - lambda: id(fail_set)->execute(-1);      # Синхронизация состояния "Авария" при запуске           
+      - lambda: id(gs_time_wm1) = millis();     # Инициализация метки времени для счётчика воды 1
+      - lambda: id(gs_time_wm2) = millis();     # Инициализация метки времени для счётчика воды 2
+      - output.ledc.set_frequency:              # Установка частоты мигания светодиода ручного отопления
+          id: led_heater
+          frequency: "1Hz"
+      - if:
+          condition:
+            - binary_sensor.is_on: relay_pump_check     # Если реле насоса включено
+          then:
+            - output.turn_on: led_pump_check            # Синхронизируем состояние светодиода
+            - lambda: id(gs_en_pump_fail_ctrl) = true;  # Разрешаем регулярный контроль сухого хода
+      - lambda: id(gs_init_time) = false;               # Сбрасываем флаг времени инициализации устройства
+      - script.execute: pressure_control                # Проверяем давление и включаем насос при необходимости
+
+interval:
+#######################################################################################
+# Контроль WiFi-соединения
+#######################################################################################
+  - interval: 1s
+    then:
+      if:
+        condition:
+          - lambda: return !id(gs_init_time);         # Если сейчас не инициализация устройства
+        then: 
+          if:
+            condition:
+              - wifi.connected                        # Если установлено WiFi-соединение с сервером Home Assistant
+            then:
+              - output.turn_on: led_wifi              # Тогда включить светодиод
+            else:
+              - output.turn_off: led_wifi             # Иначе выключить светодиод
+
+#######################################################################################
+# Контроль реле аварии, если после сброса ошибки реле продолжает быть включенным (от лягушки)
+#######################################################################################
+  - interval: 3s
+    then:
+      # Здесь задержка 200 мс должна быть больше задержки 100 мс фильтра дребезга бинарного сенсора relay_fail_check,
+      # иначе при старте системы после включения питания состояние этого сенсора определялось как "off",
+      # в то время как реле было выключено и реальный уровень на пине был "on" (инверсная логика - подтяжка к единице).
+      - delay: 200ms
+      - if:
+          condition:
+            - binary_sensor.is_off: relay_fail_check  # Если реле аварии включено (инверсная логика)
+            - lambda: return id(gs_fail_code) == 0;
+          then:
+            - lambda: id(fail_set)->execute(1);       # Авария - затопление кессона     
+
+#######################################################################################
+# Таймер обратного отсчёта до автовключения контроля утечки воды после ручного отключения
+#######################################################################################
+  - interval: 1min
+    then:
+      if:
+        condition:
+          - lambda: return id(gs_no_leak_control);                            # Если контроль утечки воды отключен
+        then: 
+          - lambda: id(gs_time_before_leak_control_on)--;                     # Декременитруем таймер отсрочки автовключения контроля утечки воды
+          - if:
+              condition: 
+                - lambda: return id(gs_time_before_leak_control_on) <= 0;     # Таймер завершён
+              then:  
+                - switch.turn_off: leak_control                               # Включаем контроль утечки (выключаем его выключение)
+
+#######################################################################################
+# Публикация и сброс счётчиков пусков насоса и времени его работы
+#######################################################################################
+  - interval: 60min
+    then:
+      - sensor.template.publish:                                # Публикуем число пусков насоса в час
+          id: count_of_pump_starts
+          state: !lambda return (id(gs_count_of_pump_starts));
+      - lambda: id(gs_count_of_pump_starts) = 0;                # Сбрасываем счётчик пусков
+      - sensor.template.publish:                                # Публикуем продолжительность работы насоса в час
+          id: pump_operating_time
+          state: !lambda return (id(gs_pump_operating_time) / 60 );
+      - lambda: id(gs_pump_operating_time) = 0;                 # Сбрасываем счётчик времени работы      
+
+#######################################################################################
+# Время работы насоса
+#######################################################################################
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            - binary_sensor.is_on: relay_pump_check   # Если реле насоса влючено
+          then:
+            - lambda: id(gs_pump_operating_time)++;   # Инкрементируем счётчик времени работы насоса
+
+#######################################################################################
+# Контроль сухого хода насоса
+#######################################################################################
+  - interval: 5s
+    then:
+      - if:
+          condition:
+            - lambda: return id(gs_en_pump_fail_ctrl);  # Если разрешён регулярный контроль сухого хода
+            - binary_sensor.is_on: relay_pump_check     # Если реле насоса влючено
+            - lambda: return id(wm1_flow).state == 0;   # Если поток на счётчике 1 нулевой
+          then:
+            - lambda: id(fail_set)->execute(2);         # Авария - насос неисправен/сухой ход              
+
+output:
+#######################################################################################
+# Светодиоды
+#######################################################################################
+  - platform: gpio    # "Режим автоматики"
+    pin: GPIO21
+    id: led_mode
+  - platform: gpio    # "WiFi"
+    pin: GPIO22
+    id: led_wifi
+  - platform: gpio    # "Включение насоса"
+    pin: GPIO18
+    id: led_pump_on
+  - platform: gpio    # "Контроль насоса"
+    pin: GPIO19
+    id: led_pump_check
+  - platform: ledc    # "Отопление"
+    pin: GPIO17
+    id: led_heater
+  - platform: gpio    # "Авария"
+    pin: GPIO16
+    id: led_fail
+#######################################################################################
+# Твёрдотельные реле
+#######################################################################################
+  - platform: gpio    # "Режим автоматики" (управляет модульным контактором напрямую)
+    pin: GPIO33
+    id: relay_mode
+  - platform: gpio    # "Авария" (управляет модульным контактором напрямую параллельно с лягушкой)
+    pin: GPIO25
+    id: relay_fail
+  - platform: gpio    # "Насос"  (не управляет модульным контактором напрямую, только подаёт напряжения в цепь питания реле,
+    pin: GPIO32       # которая может быть прервана любым из трёх коммутационных устройств (режим автоматики, авария, ручной режим насоса))
+    id: relay_pump
+  - platform: gpio    # "Отопление" (управляет модульным контактором напрямую)
+    pin: GPIO23
+    id: relay_heater
+
+packages:
+#######################################################################################
+# Датчик давления воды 1 (после насоса, до фильтра)
+#######################################################################################
+  press_sensor1: !include
+    file: caisson-controller.pressure-sensor.yaml
+    vars:
+      adc_sensor_name: "Pressure before filter (adc)"
+      adc_sensor_id: press_pump_raw
+      GPIO_number: GPIO36
+      zero_segment: 500 -> 0.0
+      working_segment: 3000 -> 5
+      out_sensor_name: "Pressure before filter"
+      out_sensor_id: press_pump
+      precise_sensor_name: "Pressure before filter (precise)"
+      precise_sensor_id: press_pump_precise      
+      script_name: filter_control
+
+#######################################################################################
+# Датчик давления воды 2 (после фильтра, до редуктора)
+#######################################################################################
+  press_sensor2: !include
+    file: caisson-controller.pressure-sensor.yaml
+    vars:
+      adc_sensor_name: "Pressure after filter (adc)"
+      adc_sensor_id: press_tank_raw
+      GPIO_number: GPIO39
+      zero_segment: 500 -> 0.0
+      working_segment: 3000 -> 5
+      out_sensor_name: "Pressure after filter"
+      out_sensor_id: press_tank
+      precise_sensor_name: "Pressure after filter (precise)"
+      precise_sensor_id: press_tank_precise
+      script_name: pressure_control
+
+#######################################################################################
+# Датчик давления воды 2 (после редуктора)
+#######################################################################################
+  press_sensor3: !include
+    file: caisson-controller.pressure-sensor.yaml
+    vars:
+      adc_sensor_name: "Pressure after reducer (adc)"
+      adc_sensor_id: press_reductor_raw
+      GPIO_number: GPIO34
+      zero_segment: 500 -> 0.0
+      working_segment: 3000 -> 5
+      out_sensor_name: "Pressure after reducer"
+      out_sensor_id: press_reductor
+      precise_sensor_name: "Pressure after reducer (precise)"
+      precise_sensor_id: press_reductor_precise
+      script_name: no_script
+
+#######################################################################################
+# Счётчик воды 1 наполнения ГА (до фильтра)
+#######################################################################################
+  water_meter1: !include
+    file: caisson-controller.water-meter.yaml
+    vars:
+      wm_name: "Water meter 1 pulse"
+      wm_id: wm1
+      GPIO_number: GPIO27
+      pulse_width_sensor_name: "Water meter 1 pulse period"
+      total_sensor_name: "Water meter 1 total"
+      flow_sensor_name: "Water meter 1 flow"
+      uniform_flow_sensor_name: "Water meter 1 uniform flow"
+      zero_flow_sensor_name: "Water meter 1 zero flow"
+      script_name: water_leak_meter1
+
+#######################################################################################
+# Счётчик воды 2 расхода из ГА (после гидробака)
+#######################################################################################
+  water_meter2: !include
+    file: caisson-controller.water-meter.yaml
+    vars:
+      wm_name: "Water meter 2 pulse"
+      wm_id: wm2
+      GPIO_number: GPIO14
+      pulse_width_sensor_name: "Water meter 2 pulse period"
+      total_sensor_name: "Water meter 2 total"
+      flow_sensor_name: "Water meter 2 flow"
+      uniform_flow_sensor_name: "Water meter 2 uniform flow"
+      zero_flow_sensor_name: "Water meter 2 zero flow"
+      script_name: water_leak_meter2
+
+binary_sensor:
+#######################################################################################
+# Контроль реле насоса
+#######################################################################################
+  - platform: gpio
+    id: relay_pump_check
+    pin:
+      number: GPIO13
+      mode:
+        input: true
+    filters:                                            # Фильтр дребезга контактов
+      - delayed_on: 100ms
+      - delayed_off: 100ms
+    on_press:                                           # При включении реле насоса (сигнал контроля 0->1)
+      then:
+        - output.turn_on: led_pump_check                # Включить светодиод
+        - lambda: id(gs_count_of_pump_starts)++;        # Инкрементируем счётчик пусков насоса в час
+        - sensor.template.publish:                      # Публикуем число пусков насоса в час
+            id: count_of_pump_starts
+            state: !lambda return (id(gs_count_of_pump_starts));
+        - delay: 5s                                     # Ожидаем пуска насоса и начала потока
+        - if:
+            condition: 
+              - lambda: return id(wm1_flow).state == 0; # Если поток на счётчике 1 нулевой
+            then:  
+              - lambda: id(fail_set)->execute(2);       # Авария - насос неисправен/сухой ход              
+        - lambda: id(gs_en_pump_fail_ctrl) = true;      # Через 5 секунд после старта разрешаем регулярный контроль сухого хода
+    on_release: 
+      then:
+        - output.turn_off: led_pump_check               # Выключить светодиод
+        - lambda: id(gs_en_pump_fail_ctrl) = false;     # Запрещаем  регулярный контроль сухого хода
+
+#######################################################################################
+# Контроль реле аварии
+#######################################################################################
+  - platform: gpio
+    id: relay_fail_check
+    pin:
+      number: GPIO26
+      mode:
+        input: true
+    filters:                                            # Фильтр дребезга контактов
+      - delayed_on: 100ms
+      - delayed_off: 100ms
+    on_release:                                         # При включении реле аварии (сигнал контроля 1->0)
+      then:
+        - if: 
+            condition:
+              - lambda: return id(gs_fail_code) == 0;   # Если сейчас нет аварии
+            then:
+              - lambda: id(fail_set)->execute(1);       # Авария - затопление кессона
+          
+#######################################################################################
+# Кнопка 1 на контроллере - Выбора режима автоматики
+#######################################################################################
+  - platform: gpio
+    id: hard_button_ctrl_mode
+    pin:
+      number: GPIO35
+      mode:
+        input: true
+    filters:                                                # Фильтр дребезга контактов
+      - delayed_on: 100ms
+      - delayed_off: 100ms
+    on_release:                                             # Кнопка нажата (инверсная логика, входной сигнал 1->0)
+      then:        
+        - lambda: id(gs_ctrl_mode) = !(id(gs_ctrl_mode));   # Инвертируем глобальную переменную
+        - script.execute: set_ctrl_mode                     # Переключаем режим
+
+#######################################################################################
+# Кнопка 2 на контроллере - Сброс аварии, ручное включение отопления, сброс параметров
+#######################################################################################
+  - platform: gpio
+    id: hard_button_fail_reset
+    pin:
+      number: GPIO15
+      mode:
+        input: true
+    filters:                                                    # Фильтр дребезга контактов
+      - delayed_on: 100ms
+      - delayed_off: 100ms
+    on_release:                                                 # Кнопка нажата (инверсная логика, входной сигнал 1->0)
+      then:
+        - script.execute: reset_all_params                      # СБРОС ПАРАМЕТРОВ (старт задержки ожидания удержания кнопки)
+    on_press:                                                   # Кнопка отпущена (инверсная логика, входной сигнал 0->1)
+      then:
+        - script.stop: reset_all_params                         # Сброс параметров (отмена задержки ожидания удержания кнопки)
+        - if:
+            condition:
+              - lambda: return id(gs_fail_code) == 0;           # Если сейчас нет аварии
+            then: 
+              script.execute: toggle_manual_heating             # ВКЛЮЧЕНИЕ/ВЫКЛЮЧЕНИЕ ОТОПЛЕНИЯ ВРУЧНУЮ
+            else:
+              - lambda: id(fail_set)->execute(0);               # СБРОС АВАРИИ
+
+#######################################################################################
+# Индикатор включенного отопления в интефейсе HA
+#######################################################################################
+  - platform: template
+    name: "Heating"
+    id: bs_heating_on
+    lambda: return id(gs_heating_on);
+
+#######################################################################################
+# Индикатор ручного режима отопления в интефейсе HA
+#######################################################################################
+  - platform: template
+    name: "Heating manual"
+    id: bs_heating_manual
+    lambda: return id(gs_manual_heating);
+
+#######################################################################################
+# Индикатор подачи команды включения насоса в интефейсе HA
+#######################################################################################
+  - platform: template
+    name: "Pump"
+    id: bs_pump_on
+    lambda: return id(gs_pump_on);
+
+#######################################################################################
+# Индикатор состояния модульного реле насоса в интефейсе HA
+#######################################################################################
+  - platform: template
+    name: "Pump state"
+    id: bs_pump_state
+    lambda: return id(relay_pump_check).state;
+
+button:
+#######################################################################################
+# Сброс аварии из интерфейса HA
+#######################################################################################
+  - platform: template
+    name: "Fail reset"
+    id: but_fail_reset
+    on_press: 
+      then:
+        - lambda: id(fail_set)->execute(0);                     # СБРОС АВАРИИ
+
+#######################################################################################
+# Ручное включение/выключение отопления из интерфейса HA
+#######################################################################################
+  - platform: template
+    name: "Toggle manual heating"
+    id: but_toggle_manual_heating
+    on_press: 
+      then:
+        - script.execute: toggle_manual_heating        
+
+number:
+#######################################################################################
+# Настройка периода времени без контроля утечки воды в интерфейсе HA
+#######################################################################################
+  - platform: template
+    name: "Period without leakage control"
+    id: period_without_leak_control
+    unit_of_measurement: "час"
+    min_value: 1
+    max_value: 24
+    step: 1
+    optimistic: true
+
+#######################################################################################
+# Настройка верхнего давления воды (давления отключения насоса)
+#######################################################################################
+  - platform: template
+    name: "Maximum pressure"
+    id: maximum_pressure
+    unit_of_measurement: "бар"
+    min_value: 2.7
+    max_value: 3.7
+    step: 0.1
+    restore_value: true
+    optimistic: true
+    initial_value: 3.5
+    device_class: pressure
+
+#######################################################################################
+# Настройка нижнего давления воды (давления включения насоса)
+#######################################################################################
+  - platform: template
+    name: "Minimum pressure"
+    id: minimum_pressure
+    unit_of_measurement: "бар"
+    min_value: 1.7
+    max_value: 2.7
+    step: 0.1
+    restore_value: true
+    optimistic: true
+    initial_value: 2.5
+    device_class: pressure
+
+switch:
+#######################################################################################
+# Переключатель в интерфейсе HA отключения контроля утечки воды на заданное время
+#######################################################################################
+  - platform: template
+    name: "Disabling water leakage control"
+    id: leak_control
+    lambda: return id(gs_no_leak_control);
+    turn_on_action:
+      - lambda:  id(gs_no_leak_control) = true;
+      - lambda: id(gs_time_before_leak_control_on) = id(period_without_leak_control).state * 60;
+    turn_off_action:
+      - lambda:  id(gs_no_leak_control) = false;
+      - lambda: id(gs_time_before_leak_control_on) = 0;
+    optimistic: true
+
+#######################################################################################
+# Переключатель в интерфейсе HA выбора режима автоматики
+#######################################################################################
+  - platform: template
+    name: "Control mode"
+    lambda: return id(gs_ctrl_mode);
+    turn_on_action:
+      - lambda:  id(gs_ctrl_mode) = true;
+      - output.turn_on: led_mode
+    turn_off_action:
+      - lambda:  id(gs_ctrl_mode) = false;
+      - output.turn_off: led_mode
+    optimistic: true
+    restore_mode: DISABLED 
+    # по дефолту restore_mode: ALWAYS_OFF, и без DISABLED сбивался на ноль gs_ctrl_mode при загрузке
+
+script:
+#######################################################################################
+# Включение отопления
+#######################################################################################
+  - id: heater_on 
+    then:    
+      - output.turn_on: led_heater            # Включаем светодиод отопления
+      - output.turn_on: relay_heater          # Включаем реле отопления
+      - lambda: id(gs_heating_on) = true;     # Устанавливаем флаг включенного отопления
+
+#######################################################################################
+# Выключение отопления
+#######################################################################################
+  - id: heater_off
+    then:    
+      - output.turn_off: led_heater           # Выключаем светодиод отопления
+      - output.turn_off: relay_heater         # Выключаем реле отопления
+      - lambda: id(gs_heating_on) = false;    # Сбрасываем флаг включенного отопления
+
+#######################################################################################
+# Управление отоплением по датчикам температуры
+#######################################################################################
+  - id: heater 
+    then:
+      if: 
+        condition:
+          - lambda: return !id(gs_init_time);                       # Если сейчас не инициализация устройства
+          - lambda: return !id(gs_manual_heating);                  # Если сейчас не ручной режим отопления
+        then: 
+          if:
+            condition: 
+              or:
+                - lambda: return id(t_top_water_pipe).state < 1;    # Если температура верхней точки водопровода меньше 1°
+                - lambda: return id(t_bottom_water_pipe).state < 1; # Или если температура нижней точки водопровода меньше 1°
+            then:
+              - script.execute: heater_on                           # Включаем отопление
+            else:
+              - script.execute: heater_off                          # Выключаем отопление
+
+#######################################################################################
+# Авария (контроль аварийных ситуаций и срабатывание защиты производится при любом режиме автоматики)
+#######################################################################################
+  - id: fail_set
+    parameters: 
+      error_code: int
+    then:  
+      #- lambda: 'ESP_LOGI("Вход", "error_code = %d", error_code);'          
+      #- lambda: 'ESP_LOGI("Вход", "gs_fail_code = %d", id(gs_fail_code));'          
+      - if:
+          condition:
+            - lambda: return error_code >= 0;           # Если сейчас не инициализация устройства и не восстановление кода ошибки из флэшки
+          then:
+            - lambda: id(gs_fail_code) = error_code;    # Запоминаем код ошибки в глобальной переменной
+      - if:
+          condition:
+            - lambda: return id(gs_fail_code) == 0;     # Если нужно выполнить сброс аварии (код 0 - нет аварии)
+          then: 
+            - output.turn_off: relay_fail               # Выключаем реле аварии
+            - output.turn_off: led_fail                 # Выключаем светодиод аварии
+            - text_sensor.template.publish:             # Публикуем текст расшифровки кода отсутствия аварии
+                id: text_error_code
+                state: "Нет аварии"
+            - script.execute: pressure_control          # Проверяем давление и включаем насос при необходимости
+          else:                                         # Иначе сейчас авария
+            - output.turn_on: relay_fail                # Включаем реле аварии
+            - output.turn_on: led_fail                  # Включаем светодиод аварии
+            - script.execute: pump_off                  # Выключаем насос (снимаем команду включения, это не обязательно, так как реле аварии прерывает команду физически, только чтобы светодиод "включение насоса" не горел)
+            - text_sensor.template.publish:             # Публикуем текст расшифровки кода наличия аварии
+                id: text_error_code
+                state: !lambda |-
+                    switch (id(gs_fail_code)) {
+                      case 1: return "Вода на дне кессона";
+                      case 2: return "Насос неисправен / Сухой ход";
+                      case 3: return "Утечка воды до ГА (в кессоне)";
+                      case 4: return "Утечка воды после ГА (на потребителях)";
+                      case 5: return "Фильтр засорён";
+                      case 6: return "Реле насоса не включилось";
+                      default: return "Неизвестно";
+                    }
+
+#######################################################################################
+# Установка режима автоматики, 1 - от данного контроллера (внутренняя), 0 - от внешнего реле давления (внешняя)
+#######################################################################################
+  - id: set_ctrl_mode
+    then:
+      - if: 
+          condition:
+            - lambda: return id(gs_ctrl_mode);    # Если режим внутренней автоматики
+          then: 
+            - output.turn_on: led_mode            # Включаем светодиод
+            - output.turn_on: relay_mode          # Включаем реле режима автоматики
+          else:   
+            - output.turn_off: led_mode           # Выключаем светодиод
+            - output.turn_off: relay_mode         # Выключаем реле режима автоматики
+      - script.execute: pressure_control          # Проверяем состояние управления насосом
+
+#######################################################################################
+# Сброс параметров
+#######################################################################################
+  - id: reset_all_params
+    mode: restart
+    then:
+      - delay: 5s                                           # Ожидание удержания кнопки
+      - if:
+          condition: 
+            - binary_sensor.is_off: hard_button_fail_reset  # Если кнопка всё ещё нажата (инверсная логика)
+            - lambda: return id(gs_fail_code) == 0;         # Если сейчас нет аварии
+          then: 
+            - lambda: id(gs_fail_code) = -1;                # Устанавливаем несуществующий код ошибки чтобы не включилось отопление при отпускании кнопки                
+            - lambda: |-                                    # Сбрасываем все необходимые параметры в значения по умолчанию
+                id(gs_total_wm1) = 0;
+                id(gs_total_wm2) = 0;
+                id(maximum_pressure).state = 3.5;
+                id(minimum_pressure).state = 2.5;
+            - script.execute: set_ctrl_mode            
+            - repeat:                                       # Трижды мигаем красным светодиодом в подтверждение сброса #
+                count: 3                                                                                               #
+                then:                                                                                                  #
+                  - output.turn_on: led_fail                                                                           #
+                  - delay: 200ms                                                                                       #
+                  - output.turn_off: led_fail                                                                          #
+                  - delay: 200ms                                                                                       #
+
+#######################################################################################
+# Контроль утечки на счётчике воды 1
+#######################################################################################
+# Критерий утечки - равномерный расход воды на счётчике 1 в отсутствие расхода воды на счётчике 2 в течение небольшого времени
+  - id: water_leak_meter1
+    then:
+      - lambda: id(gs_current_tank_vloume)++;                           # Инкрементируем текущий объём воды в ГА
+      - if:
+          condition:
+            - lambda: return id(gs_current_tank_vloume) > ${max_tank_vloume};  # Защита от переполнения индикатора
+          then:  
+            - lambda: id(gs_current_tank_vloume) = ${max_tank_vloume};
+      - sensor.template.publish:                                        # Публикуем текущий объём вода в ГА
+          id: water_volume_in_tank
+          state: !lambda return float(id(gs_current_tank_vloume));
+      - if:
+          condition:
+            - lambda: return id(gs_time_uniform_flow_wm1) > 0;          # Если на счётчике 1 поток воды равномерен
+            - lambda: return id(gs_time_zero_flow_wm2) > 0;             # И при этом на счётчике 2 поток воды нулевой
+          then:  
+            - if:
+                condition:
+                  - lambda: return id(gs_leak_time_wm1) == 0;           # Если ещё не начали отсчёт времени вероятной утечки
+                then:
+                  - lambda: id(gs_leak_time_wm1) = millis();            # Запоминаем момент времени начала вероятной утечки
+                else:                                                   # Иначе отсчёт времени уже идёт
+                  - if:
+                      condition:
+                        - lambda: return millis() - id(gs_leak_time_wm1) > ${leak_interval_wm1} * 1000;  # Если отсчёт времени превысил заданное время наполнения ГА
+                      then:
+                        - lambda: id(fail_set)->execute(3);             # Авария - утечка на счётчике 1
+          else:             
+            - lambda: id(gs_leak_time_wm1) = 0;                         # Сбрасываем метку времени, если условие для вероятной утечки не выполняется
+                
+
+#######################################################################################
+# Контроль утечки на счётчике воды 2
+#######################################################################################
+# Критерий утечки - равномерный расход воды на счётчике 2 в течение длительного времени
+# В случае осознанной необходимости длительного расхода контроль утечки отключается из интерфейса HA на заданное время
+  - id: water_leak_meter2
+    then:
+      - lambda: id(gs_current_tank_vloume)--;                             # Декрементируем текущий объём воды в ГА
+      - if:
+          condition:
+            - lambda: return id(gs_current_tank_vloume) < 0;              # Защита от переполнения индикатора
+          then:  
+            - lambda: id(gs_current_tank_vloume) = 0;
+      - sensor.template.publish:                                          # Публикуем текущий объём вода в ГА
+          id: water_volume_in_tank
+          state: !lambda return float(id(gs_current_tank_vloume));
+      - if:
+          condition:
+            - lambda: return id(gs_time_uniform_flow_wm2) > 0;            # Если на счётчике 2 поток воды равномерен
+            - lambda: return !id(gs_no_leak_control);                     # И при этом контроль утечки не выключен
+          then:  
+            - if:
+                condition:
+                  - lambda: return id(gs_leak_time_wm2) == 0;             # Если ещё не начали отсчёт времени вероятной утечки
+                then:
+                  - lambda: id(gs_leak_time_wm2) = millis();              # Запоминаем момент времени начала вероятной утечки
+                else:                                                     # Иначе отсчёт времени уже идёт
+                  - if:
+                      condition:
+                        - lambda: return millis() - id(gs_leak_time_wm2) >  ${leak_interval_wm2} * 1000;  # Если отсчёт времени превысил заданное время контроля утечки
+                      then:
+                        - lambda: id(fail_set)->execute(4);               # Авария - утечка на счётчике 2
+          else:             
+            - lambda: id(gs_leak_time_wm2) = 0;                           # Сбрасываем метку времени, если условие для вероятной утечки не выполняется
+
+#######################################################################################
+# Включение насоса
+#######################################################################################
+  - id: pump_on
+    then:
+      if:
+        condition:
+          - lambda: return !id(gs_init_time);             # Если сейчас не инициализация устройства
+          - lambda: return id(gs_fail_code) == 0;         # Если сейчас нет аварии
+        then:
+          - output.turn_on: relay_pump                    # Включаем насос (подаём команду включения)
+          - output.turn_on: led_pump_on                   # Включаем светодиод
+          - lambda: id(gs_pump_on) = true;                # Запоминаем состояние насоса   
+          - delay: 2s                                     # Ожидаем чутка
+          - if:              
+              condition:
+                - binary_sensor.is_off: relay_pump_check  # Если реле насоса не включено
+              then:
+                - lambda: id(fail_set)->execute(6);       # Авария - реле насоса не включилось
+
+#######################################################################################
+# Выключение насоса
+#######################################################################################
+  - id: pump_off
+    then:
+      - output.turn_off: relay_pump                                             # Выключаем насос (снимаем команду включения)
+      - output.turn_off: led_pump_on                                            # Выключаем светодиод
+      - lambda: id(gs_pump_on) = false;                                         # Запоминаем состояние насоса
+      - if:
+          condition:
+            - lambda: return id(wm2_flow).state == 0;                           # Если в момент выключения насоса на втором счётчике воды не было расхода
+          then:
+            - lambda: id(gs_current_tank_vloume) = ${max_tank_vloume};          # Калибруем текущий объём вода в ГА к максимальному значению
+            - sensor.template.publish:                                          # Публикуем текущий объём вода в ГА
+                id: water_volume_in_tank
+                state: !lambda return float(id(gs_current_tank_vloume));
+
+#######################################################################################
+# Поддержание давления в ГА
+#######################################################################################
+  - id: pressure_control
+    then:
+      if:
+        condition:
+          - lambda: return id(gs_ctrl_mode);                                    # Если режим работы от внутренней автоматики
+          - lambda: return id(press_tank).state < id(minimum_pressure).state;   # Если давление на ГА ниже порога
+        then:
+          - script.execute: pump_on                                             # Включаем насос
+        else:
+          - script.execute: pump_off                                            # Выключаем насос
+
+#######################################################################################
+# Контроль засорения фильтра
+#######################################################################################
+  - id: filter_control
+    then:
+      - if:
+         condition:
+           - binary_sensor.is_on: relay_pump_check                               # Если реле насоса включено
+           - lambda: return id(wm1_flow).state > 0;                              # Если на первом счётчике ненулевой поток воды
+           - lambda: return id(press_tank).state <= id(press_pump).state - ${delta_for_filter_fail};   # Если давление после фильтра меньше чем давление до фильтра более чем на заданное значение
+         then:  
+           - lambda: id(fail_set)->execute(5);                                   # Авария - фильтр засорён
+      - sensor.template.publish:                                                 # Публикуем дельту давления на фильтре
+          id: pressure_delta_in_filter
+          state: !lambda return id(press_tank).state - id(press_pump).state;
+
+#######################################################################################
+# Заглушка
+#######################################################################################
+  - id: no_script
+    then:
+
+#######################################################################################
+# Ручное включение отопления
+#######################################################################################
+  - id: toggle_manual_heating
+    then:
+      - if:
+          condition:
+            - lambda: return id(gs_fail_code) == 0;             # Если сейчас нет аварии
+          then: 
+            if:
+              condition: 
+                - lambda: return !id(gs_heating_on);            # Если отопление выключено
+              then:
+                - script.execute: heater_on                     # ВКЛЮЧЕНИЕ ОТОПЛЕНИЯ ВРУЧНУЮ
+                - lambda: id(gs_manual_heating) = true;         # Запоминаем факт включения отопления вручную
+                - output.set_level:                             # Включаем мигание светодиода как индикацию ручного режима отопления
+                    id: led_heater
+                    level: "50%"                                # Мигание со скважностью 0.5
+              else:   
+                - output.set_level:                             # Отключаем мигание, при автовключении отопления по датчикам температуры будет гореть непрерывно
+                    id: led_heater
+                    level: "100%"                               # Мигание со скважностью 1 (нет мигания)
+                - script.execute: heater_off                    # Выключаем отопление
+                - lambda: id(gs_manual_heating) = false;        # Сбрасываем флаг ручного отопления
+
+
+text_sensor:
+#######################################################################################
+# Датчик текстового описания кода аварии для отображения в Home Assistant
+#######################################################################################
+  - platform: template
+    name: "Fail:"
+    id: text_error_code
+
+#######################################################################################
+# Температурные датчики
+#######################################################################################
+dallas:
+  - pin: GPIO4
+    update_interval: ${dallas_update_interval}
+
+sensor:
+#######################################################################################
+# Текущий объём воды в ГА
+#######################################################################################
+  - platform: template
+    name: "Water volume in tank"
+    id: water_volume_in_tank
+    unit_of_measurement: "л"
+    accuracy_decimals: 0
+    
+#######################################################################################
+# Дельта давления на входе и выходе фильтра
+#######################################################################################
+  - platform: template
+    name: "Pressure delta in filter"
+    id: pressure_delta_in_filter
+    unit_of_measurement: "бар"
+    accuracy_decimals: 1    
+
+#######################################################################################
+# Число пусков насоса в час
+#######################################################################################
+  - platform: template
+    name: "Сount of pump starts per hour"
+    id: count_of_pump_starts
+    accuracy_decimals: 0    
+
+#######################################################################################
+# Продолжительность работы насоса в час
+#######################################################################################
+  - platform: template
+    name: "Pump operating time per hour"
+    id: pump_operating_time
+    unit_of_measurement: "мин"
+    accuracy_decimals: 0    
+
+######################################################################################
+# Датчики температуры
+#######################################################################################
+  - platform: dallas                # 1 - Под крышкой кесона
+    name: "Under cover"
+    id: t_under_cover
+    address: "0x5b3ca0f649249a28"
+  - platform: dallas                # 2 - Под плечами кессона
+    name: "Under shoulders"
+    id: t_under_shoulders
+    address: "0x1111111111111112"
+  - platform: dallas                # 3 - Верхняя точка водопровода
+    name: "Top water pipe"
+    id: t_top_water_pipe
+    address: "0x1111111111111113"
+    on_value: 
+      then:
+        - script.execute: heater
+  - platform: dallas                # 4 - Нижняя точка водопровода
+    name: "Bottom water pipe"
+    id: t_bottom_water_pipe
+    address: "0x1111111111111114"
+
+
+# Проверка управления твёрдотельными реле из интерфейса HA на этапе отладки
+#switch:
+#  - platform: template
+#    name: relay_mode_sw
+#    turn_on_action:
+#      - output.turn_on: relay_mode
+#    turn_off_action:
+#      - output.turn_off: relay_mode
+#    optimistic: true
+#    restore_mode: DISABLED 
+#
+#  - platform: template
+#    name: relay_fail_sw
+#    turn_on_action:
+#      - output.turn_on: relay_fail
+#    turn_off_action:
+#      - output.turn_off: relay_fail
+#    optimistic: true
+#    restore_mode: DISABLED 
+#
+#  - platform: template
+#    name: relay_pump_sw
+#    turn_on_action:
+#      - output.turn_on: relay_pump
+#    turn_off_action:
+#      - output.turn_off: relay_pump
+#    optimistic: true
+#    restore_mode: DISABLED 
+#
+#  - platform: template
+#    name: relay_heater_sw
+#    turn_on_action:
+#      - output.turn_on: relay_heater
+#    turn_off_action:
+#      - output.turn_off: relay_heater
+#    optimistic: true
+#    restore_mode: DISABLED 

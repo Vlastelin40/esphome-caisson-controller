@@ -1,0 +1,71 @@
+# Для входов АЦП ESP32 настройка ослабления входного сигнала для датчиков давления с токовым выходом 4-20 мА:
+# attenuation: 11db - меньше шума, диапазон напряжений до 2.45 В, резистор в цепи датчика 130 Ом (2.45 В / 0.02 А = 122.5 Ом)
+# attenuation: 0db - точнее, диапазон напряжений до 1 В, резистор в цепи датчика 50 Ом (1 В / 0.02 А = 50 Ом)
+
+sensor:
+#######################################################################################
+# Датчик физического входа АЦП
+#######################################################################################
+  - platform: adc
+    name: ${adc_sensor_name}
+    id: ${adc_sensor_id}
+    attenuation: 11db                   # Ослабление входного сигнала
+    pin: ${GPIO_number}
+    unit_of_measurement: "бар"
+    icon: "mdi:gauge"
+    device_class: "pressure"
+    state_class: "measurement" 
+    accuracy_decimals: 3                # Число знаков после запятой для отображения в интерфейсе (не округление)
+    update_interval: 200ms              # Частота обновления данных оцифровки
+    filters:
+      - sliding_window_moving_average:  # Фильтр усреднения в скользящем окне
+          window_size: 25               # Размер окна в количесте измерений (200 мс * 25 = 5 сек)
+          send_every: 5                 # Публиковать данные каждые x измерений (25 / 5 = 1 сек)
+      - calibrate_linear:               # Фильтр линейной калибровки данных
+          method: exact                 # Метод интерполяции "точный" - ломаная линия непосредственно между заданных точек
+          datapoints:
+            - 0 -> 0.0
+            - ${zero_segment}                
+            - ${working_segment}
+    raw: true                           # Отменяет внутреннюю "заводскую" калибровку данных
+    on_value:
+      then:                             # Публикуем полученные данные в программные датчики с дополнительными фильтрами
+        - sensor.template.publish:      
+            id: ${out_sensor_id}
+            state: !lambda "return x;"
+        - sensor.template.publish:
+            id: ${precise_sensor_id}
+            state: !lambda "return x;"
+
+#######################################################################################
+# Вторичный программный датчик, "точный"
+#######################################################################################
+  - platform: template
+    name: ${precise_sensor_name}
+    id: ${precise_sensor_id}
+    unit_of_measurement: "бар"
+    icon: "mdi:gauge"
+    device_class: "pressure"
+    state_class: "measurement" 
+    accuracy_decimals: 2
+    filters:
+      - sliding_window_moving_average:
+         window_size: 5 
+         send_every: 1 
+      - delta: 0.009
+#######################################################################################
+# Вторичный программный датчик, "результирующий"
+#######################################################################################
+  - platform: template
+    name: ${out_sensor_name}
+    id: ${out_sensor_id}
+    unit_of_measurement: "бар"
+    icon: "mdi:gauge"
+    device_class: "pressure"
+    state_class: "measurement" 
+    accuracy_decimals: 1
+    filters:
+      - delta: 0.05
+    on_value: 
+      then:
+        - script.execute: ${script_name} 

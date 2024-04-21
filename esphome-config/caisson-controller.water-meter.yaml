@@ -1,0 +1,136 @@
+# Харакетристики счётчика воды
+# ZENNER ETKD-I Ду-20 мм (1 л/имп)
+# https://market.yandex.ru/product--schetchik-kholodnoi-vody-s-impulsnym-vykhodom-zenner-etkd-i-du-20-mm-1-l-imp/1898813335
+# Монтажная длина 130 мм
+# Материал корпуса латунь
+# Условный проход 3/4" (20 мм)
+# Диаметр подключения 1"
+# Номинальный расход 2.5 м³/час
+# Максимальный расход 5 м³/час (1 литр за 0.72 секунды (3600/5000))
+# Минимальный расход 0.05 м³/час (1 литр за 72 секунды (3600/50))
+# Максимальное рабочее давление 16 бар
+
+binary_sensor:
+#######################################################################################
+# Датчик импульса счётчика воды
+#######################################################################################
+  - platform: gpio
+    name: ${wm_name}
+    id: ${wm_id}
+    pin:
+      number: ${GPIO_number}
+      mode:
+        input: true
+    filters:                                                                # Фильтр дребезга контактов
+      - delayed_on: 100ms
+      - delayed_off: 100ms
+    on_press: 
+      then:
+        - lambda: id(gs_time_ms) = millis();                                # Запоминаем текущий момент времени в буферную переменную
+        - if:
+            condition:                                                      # Если ширина текущего импульса равна ширине предыдущего импульса +-10%
+              - lambda: |-
+                  int prev_width = (int)id(${wm_id}_pulse_width).state;                                                     
+                  int cur_width = id(gs_time_ms) - id(gs_time_${wm_id});
+                  return (cur_width < prev_width + (int)(prev_width * 0.1)) and (cur_width > (int)(prev_width - prev_width * 0.1));
+            then: 
+              - lambda: id(gs_time_uniform_flow_${wm_id}) += (id(gs_time_ms) - id(gs_time_${wm_id}));   # Инкрементируем счётчик времени неизменной скорости потока воды (в миллисекундах)
+            else:  
+              - lambda: id(gs_time_uniform_flow_${wm_id}) = 0;              # Обнуляем счётчик времени неизменной скорости потока воды
+        - sensor.template.publish:
+            id: ${wm_id}_pulse_width
+            state: !lambda "return id(gs_time_ms) - id(gs_time_${wm_id});"  # Вычисляем и публикуем временной интервал между импульсами
+        - lambda: id(gs_total_${wm_id})++;                                  # Инкрементируем показания счётчика 
+        - sensor.template.publish:
+            id: ${wm_id}_total
+            state: !lambda "return id(gs_total_${wm_id});"                  # Публикуем показания счётчика
+        - if:
+            condition: 
+              - lambda: return id(gs_time_ms) > id(gs_time_${wm_id});       # Защита от переполнения millis (переполнение каждые 49.71 суток)
+            then:  
+              - sensor.template.publish:                                    # Вычисляем и публикуем текущую скорость потока воды (в литрах в минуту)
+                  id: ${wm_id}_flow
+                  state: !lambda "return 60000.0 / (id(gs_time_ms) - id(gs_time_${wm_id}));"                  
+        - lambda: id(gs_time_zero_flow_${wm_id}) = 0;                       # Обнуляем счётчик времени отсутствия потока воды
+        - script.execute: ${script_name}                                    # Выполняем скрипт, назначенный в главном модуле
+        - lambda: id(gs_time_${wm_id}) = id(gs_time_ms);                    # Запоминаем текущий момент времени для вычислений на следующем импульсе счётчика        
+
+sensor:
+#######################################################################################
+# Датчик длительности импульса счётчика воды (в миллисекундах)
+#######################################################################################
+  - platform: template
+    name: ${pulse_width_sensor_name}
+    id: ${wm_id}_pulse_width
+    accuracy_decimals: 0
+    unit_of_measurement: "мсек"
+
+#######################################################################################
+# Датчик показаний счётчика воды (в литрах)
+#######################################################################################
+  - platform: template
+    name: ${total_sensor_name}
+    id: ${wm_id}_total
+    accuracy_decimals: 0
+    unit_of_measurement: "л"
+
+#######################################################################################
+# Датчик скорости потока счётчика воды (в литрах в минуту)
+#######################################################################################
+  - platform: template
+    name: ${flow_sensor_name}
+    id: ${wm_id}_flow
+    accuracy_decimals: 1
+    unit_of_measurement: "л/мин"
+
+text_sensor:
+#######################################################################################
+# Датчик времени отсутствия потока счётчика воды (в секундах)
+#######################################################################################
+  - platform: template
+    name: ${zero_flow_sensor_name}
+    id: ${wm_id}_zero_flow
+    lambda: return seconds_to_string_dhms(id(gs_time_zero_flow_${wm_id}));
+    icon: mdi:clock-start
+    update_interval: 1s
+
+#######################################################################################
+# Датчик времени неизменной скорости потока счётчика воды (в секундах)
+#######################################################################################
+  - platform: template
+    name: ${uniform_flow_sensor_name}
+    id: ${wm_id}_uniform_flow
+    lambda: return seconds_to_string_hms(id(gs_time_uniform_flow_${wm_id}) / 1000);
+    icon: mdi:clock-start
+    update_interval: 1s    
+
+#######################################################################################
+# Обнуление датчиков, когда долго нет импульсов, и отсчёт времени без потока
+#######################################################################################
+interval:
+  - interval: 1s
+    then:
+      if:
+        condition:
+          or:
+            - lambda: return millis() - id(gs_time_${wm_id}) > id(${wm_id}_pulse_width).state * 2; # Если с момента последнего импульса прошло вдвое больше времени, чем между последним и предпоследним
+            - lambda: return millis() - id(gs_time_${wm_id}) > 120000;                             # Или если с момента последнего импульса прошло более двух минут (максимальный паспортный интервал счётчика 72 секунды)
+            - lambda: return millis() < id(gs_time_${wm_id});                                      # Защита от переполнения millis (переполнение каждые 49.71 суток)
+            - lambda: return id(gs_init_time);                                                      # Если сейчас инициализация устройства
+        then:  
+          - sensor.template.publish:                                                               # Обнуляем датчик скорости потока
+              id: ${wm_id}_flow
+              state: 0
+          - lambda: id(gs_time_uniform_flow_${wm_id}) = 0;                                         # Обнуляем счётчик времени неизменной скорости потока воды
+          - sensor.template.publish:                                                               # Обнуляем датчик длительности импульса
+              id: ${wm_id}_pulse_width
+              state: 0
+          - lambda: id(gs_time_zero_flow_${wm_id}) = (millis() - id(gs_time_${wm_id})) / 1000;     # Вычисляем счётчик времени отсутствия потока воды (в миллисекундах)
+
+              
+
+
+
+              
+
+
