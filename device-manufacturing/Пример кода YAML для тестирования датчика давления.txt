@@ -1,0 +1,56 @@
+#######################################################################################
+  - platform: adc
+    name: press_pump_raw
+    id: press_pump_raw
+    attenuation: 11db
+    pin: GPIO36
+    unit_of_measurement: "бар"
+    icon: "mdi:gauge"
+    device_class: "pressure"
+    state_class: "measurement" 
+    accuracy_decimals: 3
+    update_interval: 200ms
+    filters:
+      - sliding_window_moving_average:
+          window_size: 25
+          send_every: 5
+      - calibrate_linear:
+          method: exact
+          datapoints:
+            - 0 -> 0.0
+            - 500 -> 0.0
+            - 3000 -> 5
+    raw: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: press_pump
+            state: !lambda "return x;"
+        - sensor.template.publish:
+            id: press_pump_precise
+            state: !lambda "return x;"
+#######################################################################################
+  - platform: template
+    name: press_pump_precise
+    id: press_pump_precise
+    unit_of_measurement: "бар"
+    icon: "mdi:gauge"
+    device_class: "pressure"
+    state_class: "measurement" 
+    accuracy_decimals: 2
+    filters:
+      - sliding_window_moving_average:
+         window_size: 5
+         send_every: 1
+      - delta: 0.009
+#######################################################################################
+  - platform: template
+    name: press_pump
+    id: press_pump
+    unit_of_measurement: "бар"
+    icon: "mdi:gauge"
+    device_class: "pressure"
+    state_class: "measurement" 
+    accuracy_decimals: 1
+    filters:
+      - delta: 0.05
