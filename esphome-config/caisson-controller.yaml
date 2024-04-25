@@ -66,6 +66,9 @@ globals:
   - id: gs_count_of_pump_starts  # Число включений насоса в час
     type: int
     initial_value: '0'
+  - id: gs_pump_starts          # Моменты времени включений насоса в мс
+    type: uint32_t[${max_of_pump_starts} + 1]
+    initial_value: '{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}'    
   - id: gs_pump_operating_time   # Продолжительность работы насоса в час в секундах
     type: int
     initial_value: '0'
@@ -212,14 +215,10 @@ interval:
                 - switch.turn_off: leak_control                               # Включаем контроль утечки (выключаем его выключение)
 
 #######################################################################################
-# Публикация и сброс счётчиков пусков насоса и времени его работы
+# Публикация и сброс счётчика времени работы насоса за фиксированный час
 #######################################################################################
   - interval: 60min
     then:
-      - sensor.template.publish:                                # Публикуем число пусков насоса в час
-          id: count_of_pump_starts
-          state: !lambda return (id(gs_count_of_pump_starts));
-      - lambda: id(gs_count_of_pump_starts) = 0;                # Сбрасываем счётчик пусков
       - sensor.template.publish:                                # Публикуем продолжительность работы насоса в час
           id: pump_operating_time
           state: !lambda return (id(gs_pump_operating_time) / 60 );
@@ -381,32 +380,33 @@ binary_sensor:
       number: GPIO13
       mode:
         input: true
-    filters:                                            # Фильтр дребезга контактов
+    filters:                                                                        # Фильтр дребезга контактов
       - delayed_on: 100ms
       - delayed_off: 100ms
-    on_press:                                           # При включении реле насоса (сигнал контроля 0->1)
+    on_press:                                                                       # При включении реле насоса (сигнал контроля 0->1)
       then:
-        - output.turn_on: led_pump_check                # Включить светодиод
-        - lambda: id(gs_count_of_pump_starts)++;        # Инкрементируем счётчик пусков насоса в час
-        - sensor.template.publish:                      # Публикуем число пусков насоса в час
+        - output.turn_on: led_pump_check                                            # Включить светодиод
+        - lambda: id(gs_count_of_pump_starts) = check_count_of_pump_starts();       # Вычисляем число пусков насоса за последний скользящий час
+        - sensor.template.publish:                                                  # Публикуем число пусков насоса за последний скользящий час
             id: count_of_pump_starts
             state: !lambda return (id(gs_count_of_pump_starts));
         - if:
             condition: 
               - lambda: return id(gs_count_of_pump_starts) > ${max_of_pump_starts}; # Если число пусков в час превысило допустимое значение
             then:  
-              - lambda: id(fail_set)->execute(7);       # Авария - превышено число включений насоса в час
-        - delay: 5s                                     # Ожидаем пуска насоса и начала потока
-        - if:
-            condition: 
-              - lambda: return id(wm1_flow).state == 0; # Если поток на счётчике 1 нулевой
-            then:  
-              - lambda: id(fail_set)->execute(2);       # Авария - насос неисправен/сухой ход              
-        - lambda: id(gs_en_pump_fail_ctrl) = true;      # Через 5 секунд после старта разрешаем регулярный контроль сухого хода
+              - lambda: id(fail_set)->execute(7);                                   # Авария - превышено число включений насоса в час
+            else:
+              - delay: 5s                                                           # Ожидаем пуска насоса и начала потока
+              - if:
+                  condition:
+                    - lambda: return id(wm1_flow).state == 0;                       # Если поток на счётчике 1 нулевой
+                  then:  
+                    - lambda: id(fail_set)->execute(2);                             # Авария - насос неисправен/сухой ход              
+              - lambda: id(gs_en_pump_fail_ctrl) = true;                            # Через 5 секунд после старта разрешаем регулярный контроль сухого хода
     on_release: 
       then:
-        - output.turn_off: led_pump_check               # Выключить светодиод
-        - lambda: id(gs_en_pump_fail_ctrl) = false;     # Запрещаем  регулярный контроль сухого хода
+        - output.turn_off: led_pump_check                                           # Выключить светодиод
+        - lambda: id(gs_en_pump_fail_ctrl) = false;                                 # Запрещаем  регулярный контроль сухого хода
 
 #######################################################################################
 # Контроль реле аварии
