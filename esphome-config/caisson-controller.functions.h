@@ -60,7 +60,7 @@ int check_count_of_pump_starts()
                 }
             } else                                                                          // Если millis() переполнился
             {
-                if (id(gs_pump_starts)[0] + 4294967295 - id(gs_pump_starts)[i] < 3600000)   // Если дельта менее часа
+                if (id(gs_pump_starts)[0] + (sizeof(uint32_t)*0xff - id(gs_pump_starts)[i]) < 3600000)   // Если дельта менее часа
                 {
                     count++;
                 }
