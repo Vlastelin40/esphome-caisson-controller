@@ -48,7 +48,7 @@ globals:
     restore_value: yes  
   - id: gs_init_time        # Время инициализации устройства (флаг для интервала времени при включении питания контроллера)  
     type: bool  
-  - id: gs_fail_code        # Авария (код ошибки, 0 - нет аварии)  
+  - id: gs_fail_code        # Авария (код ошибки, 0 - нет аварии, все виды аварий по битовой маске)
     type: int
     restore_value: yes    
   - id: gs_manual_heating   # Ручной режим отопления  
@@ -149,7 +149,7 @@ esphome:
       - output.turn_off: led_fail                                                        #
       - delay: 1s                                                                        #
       - script.execute: set_ctrl_mode           # Синхронизация состояния "Режим автоматики" при запуске    
-      - lambda: id(fail_set)->execute(-1);      # Синхронизация состояния "Авария" при запуске           
+      - lambda: id(fail_set)->execute(-1);      # Синхронизация кода аварии при запуске
       - lambda: id(gs_time_wm1) = millis();     # Инициализация метки времени для счётчика воды 1
       - lambda: id(gs_time_wm2) = millis();     # Инициализация метки времени для счётчика воды 2
       - output.ledc.set_frequency:              # Установка частоты мигания светодиода ручного отопления
@@ -193,10 +193,10 @@ interval:
       - delay: 200ms
       - if:
           condition:
-            - binary_sensor.is_off: relay_fail_check  # Если реле аварии включено (инверсная логика)
-            - lambda: return id(gs_fail_code) == 0;
+            - binary_sensor.is_off: relay_fail_check    # Если реле аварии включено (инверсная логика)
+            - lambda: return !(id(gs_fail_code) & 1 );  # Если бит аварии затопления сброшен
           then:
-            - lambda: id(fail_set)->execute(1);       # Авария - затопление кессона     
+            - lambda: id(fail_set)->execute(1);         # Авария - затопление кессона     
 
 #######################################################################################
 # Таймер обратного отсчёта до автовключения контроля утечки воды после ручного отключения
@@ -424,7 +424,7 @@ binary_sensor:
       then:
         - if: 
             condition:
-              - lambda: return id(gs_fail_code) == 0;   # Если сейчас нет аварии
+              - lambda: return !(id(gs_fail_code) & 1 );  # Если бит аварии затопления сброшен, значит реле аварии включено лягушкой
             then:
               - lambda: id(fail_set)->execute(1);       # Авария - затопление кессона
           
@@ -645,40 +645,55 @@ script:
     parameters: 
       error_code: int
     then:  
-      #- lambda: 'ESP_LOGI("Вход", "error_code = %d", error_code);'          
-      #- lambda: 'ESP_LOGI("Вход", "gs_fail_code = %d", id(gs_fail_code));'          
+#      - lambda: 'ESP_LOGI("Вход", "error_code = %d", error_code);'          
+#      - lambda: 'ESP_LOGI("Вход", "gs_fail_code = %d", id(gs_fail_code));'          
       - if:
           condition:
-            - lambda: return error_code >= 0;           # Если сейчас не инициализация устройства и не восстановление кода ошибки из флэшки
+            - lambda: return error_code > 0;            # Если сейчас не инициализация устройства (и не восстановление кода ошибок из флэшки) и не сброс кода ошибок
           then:
-            - lambda: id(gs_fail_code) = error_code;    # Запоминаем код ошибки в глобальной переменной
+            - lambda: id(gs_fail_code) = id(gs_fail_code) | (1 << (error_code - 1));    # Запоминаем бит ошибки в глобальной переменной
       - if:
           condition:
-            - lambda: return id(gs_fail_code) == 0;     # Если нужно выполнить сброс аварии (код 0 - нет аварии)
+            - lambda: return error_code == 0;           # Если нужно выполнить сброс ошибок (код 0 - нет аварии)
           then: 
+            - lambda: id(gs_fail_code) = 0;             # Сбрасываем код ошибок в глобальной переменной
             - output.turn_off: relay_fail               # Выключаем реле аварии
             - output.turn_off: led_fail                 # Выключаем светодиод аварии
             - text_sensor.template.publish:             # Публикуем текст расшифровки кода отсутствия аварии
                 id: text_error_code
                 state: "Нет аварии"
             - script.execute: pressure_control          # Проверяем давление и включаем насос при необходимости
-          else:                                         # Иначе сейчас авария
+          else:                                         # Иначе сейчас авария или восстановление кода ошибки из флэшки при включении питания
             - output.turn_on: relay_fail                # Включаем реле аварии
             - output.turn_on: led_fail                  # Включаем светодиод аварии
             - script.execute: pump_off                  # Выключаем насос (снимаем команду включения, это не обязательно, так как реле аварии прерывает команду физически, только чтобы светодиод "включение насоса" не горел)
             - text_sensor.template.publish:             # Публикуем текст расшифровки кода наличия аварии
                 id: text_error_code
                 state: !lambda |-
-                    switch (id(gs_fail_code)) {
-                      case 1: return "Вода на дне кессона";
-                      case 2: return "Насос неисправен / Сухой ход";
-                      case 3: return "Утечка воды до ГА (в кессоне)";
-                      case 4: return "Утечка воды после ГА (на потребителях)";
-                      case 5: return "Фильтр засорён";
-                      case 6: return "Реле насоса не включилось";
-                      case 7: return "Число включений насоса в час более ${max_of_pump_starts}";
-                      default: return "Неизвестно";
+                  std::string str = "";
+                  for (int i = 0; i < 7; i++)           // Цикл по всем возможным битам ошибок
+                    {
+                      if ((id(gs_fail_code) >> i) & 1)  // Если данный бит установлен, конкатенируем текст ошибки к общему тексту всех ошибок
+                      {
+                        switch (i + 1) {
+                          case 1: str = str + "Вода на дне кессона | "; break;
+                          case 2: str = str + "Сухой ход или насос неисправен | "; break;
+                          case 3: str = str + "Утечка воды до ГА (в кессоне) | "; break;
+                          case 4: str = str + "Утечка воды после ГА (на потребителях) | "; break;
+                          case 5: str = str + "Фильтр засорён | "; break;
+                          case 6: str = str + "Реле насоса не включилось | "; break;
+                          case 7: str = str + "Число включений насоса в час более ${max_of_pump_starts} | "; break;
+                        }                        
+                      }                      
                     }
+                    str.pop_back();                       // Удаляем три последних символа " | "
+                    str.pop_back();
+                    str.pop_back();
+                    return {str};
+      - sensor.template.publish:                        # Публикуем код аварии
+          id: fail_code
+          state: !lambda return id(gs_fail_code);
+
 
 #######################################################################################
 # Установка режима автоматики, 1 - от данного контроллера (внутренняя), 0 - от внешнего реле давления (внешняя)
@@ -908,6 +923,14 @@ dallas:
     update_interval: ${dallas_update_interval}
 
 sensor:
+#######################################################################################
+# Код аварии (биты ошибок)
+#######################################################################################
+  - platform: template
+    name: "Fail code"
+    id: fail_code
+    accuracy_decimals: 0
+    
 #######################################################################################
 # Текущий объём воды в ГА
 #######################################################################################
