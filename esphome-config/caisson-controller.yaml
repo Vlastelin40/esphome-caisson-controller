@@ -161,6 +161,9 @@ esphome:
           then:
             - output.turn_on: led_pump_check            # Синхронизируем состояние светодиода
             - lambda: id(gs_en_pump_fail_ctrl) = true;  # Разрешаем регулярный контроль сухого хода
+      - sensor.template.publish:                        # Публикуем максимальный объём ГА
+         id: max_tank_volume
+         state: ${max_tank_vloume}
       - lambda: id(gs_init_time) = false;               # Сбрасываем флаг времени инициализации устройства
       - script.execute: pressure_control                # Проверяем давление и включаем насос при необходимости
 
@@ -839,6 +842,7 @@ script:
       - if:
           condition:
             - lambda: return id(wm2_flow).state == 0;                           # Если в момент выключения насоса на втором счётчике воды не было расхода
+            - lambda: return id(gs_fail_code) == 0;                             # Если сейчас нет аварии
           then:
             - lambda: id(gs_current_tank_vloume) = ${max_tank_vloume};          # Калибруем текущий объём вода в ГА к максимальному значению
             - sensor.template.publish:                                          # Публикуем текущий объём вода в ГА
@@ -923,6 +927,15 @@ dallas:
     update_interval: ${dallas_update_interval}
 
 sensor:
+#######################################################################################
+# Максимальный объём ГА (константа)
+#######################################################################################
+  - platform: template
+    name: "Max tank volume"
+    id: max_tank_volume
+    accuracy_decimals: 0
+    update_interval: never
+
 #######################################################################################
 # Код аварии (биты ошибок)
 #######################################################################################
