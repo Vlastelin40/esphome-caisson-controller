@@ -672,7 +672,16 @@ script:
       - if:
           condition:
             - lambda: return error_code == 0;           # Если нужно выполнить сброс ошибок (код 0 - нет аварии)
-          then: 
+          then:
+            - if: 
+                condition:
+                  - lambda: return ((id(gs_fail_code) >> 6) & 1); # Если был установлен бит аварии превышения числа включений насоса
+                then:  
+                  - lambda: clear_array_of_pump_starts();         # Очищаем массив пусков насоса
+                  - lambda: id(gs_count_of_pump_starts) = 0;      # Обнуляем число пусков насоса
+                  - sensor.template.publish:                      # Публикуем число пусков насоса
+                      id: count_of_pump_starts
+                      state: !lambda return (id(gs_count_of_pump_starts));
             - lambda: id(gs_fail_code) = 0;             # Сбрасываем код ошибок в глобальной переменной
             - output.turn_off: relay_fail               # Выключаем реле аварии
             - output.turn_off: led_fail                 # Выключаем светодиод аварии

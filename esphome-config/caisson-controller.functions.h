@@ -44,6 +44,15 @@ std::string seconds_to_string_hms(uint32_t seconds)
   return {buffer};
 }
 
+void clear_array_of_pump_starts()
+{
+  int len = sizeof(id(gs_pump_starts)) / sizeof(id(gs_pump_starts)[0]);         // Длина массива моментов времени пусков насоса
+  for (int i = 0; i < len; i++) 
+  {
+    id(gs_pump_starts)[i] = 0;                                                  // Очистка массива
+  }
+}
+
 void save_pump_start_time()
 {
   int len = sizeof(id(gs_pump_starts)) / sizeof(id(gs_pump_starts)[0]);         // Длина массива моментов времени пусков насоса
@@ -58,19 +67,19 @@ int check_count_of_pump_starts()
 {
   int len = sizeof(id(gs_pump_starts)) / sizeof(id(gs_pump_starts)[0]);         // Длина массива моментов времени пусков насоса
   int count = 0;                                                                // Счётчик пусков за последний час
-  uint32_t time_now = millis();                                                 // Текущий момент времени
+  uint32_t time_now = millis();                                                 // Текущий момент времени (ежеминутная проверка числа пусков выполняется от текущего момента времени)
   for (int i = 0; i < len; i++) 
   {
     if (time_now >= id(gs_pump_starts)[i])                                      // Если millis() не переполнился
     {
-      if (time_now - id(gs_pump_starts)[i] < 3600000)                           // Если дельта менее часа
+      if (id(gs_pump_starts)[i] != 0 && time_now - id(gs_pump_starts)[i] < 3600000) // Если это ненулевое значение и дельта менее часа
       {
         count++;
       }
     } 
     else                                                                        // Если millis() переполнился
     {
-      if (time_now + (sizeof(uint32_t)*0xff - id(gs_pump_starts)[i]) < 3600000) // Если дельта менее часа
+      if (id(gs_pump_starts)[i] != 0 && time_now + (sizeof(uint32_t)*0xff - id(gs_pump_starts)[i]) < 3600000) // Если это ненулевое значение и дельта менее часа
       {
         count++;
       }
