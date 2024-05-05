@@ -66,7 +66,7 @@ globals:
   - id: gs_count_of_pump_starts  # Число включений насоса в час
     type: int
     initial_value: '0'
-  - id: gs_pump_starts          # Моменты времени включений насоса в мс
+  - id: gs_pump_starts          # Моменты времени включений насоса в мс   gs_pump_starts[${max_of_pump_starts}]
     type: uint32_t[${max_of_pump_starts} + 1]
     initial_value: '{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}'    
   - id: gs_pump_operating_time   # Продолжительность работы насоса в час в секундах
@@ -164,6 +164,9 @@ esphome:
       - sensor.template.publish:                        # Публикуем максимальный объём ГА
          id: max_tank_volume
          state: ${max_tank_vloume}
+      - sensor.template.publish:                        # Публикуем аварийную дельту давления на фильтре
+         id: delta_for_filter_fail
+         state: ${delta_for_filter_fail}         
       - lambda: id(gs_init_time) = false;               # Сбрасываем флаг времени инициализации устройства
       - script.execute: pressure_control                # Проверяем давление и включаем насос при необходимости
 
@@ -249,7 +252,17 @@ interval:
             - binary_sensor.is_on: relay_pump_check     # Если реле насоса влючено
             - lambda: return id(wm1_flow).state == 0;   # Если поток на счётчике 1 нулевой
           then:
-            - lambda: id(fail_set)->execute(2);         # Авария - насос неисправен/сухой ход              
+            - lambda: id(fail_set)->execute(2);         # Авария - насос неисправен/сухой ход   
+
+#######################################################################################
+# Вычисление числа пусков насоса за последний скользящий час для индикации
+#######################################################################################
+  - interval: 1min
+    then:
+      - lambda: id(gs_count_of_pump_starts) = check_count_of_pump_starts();       # Вычисляем число пусков насоса за последний скользящий час
+      - sensor.template.publish:                                                  # Публикуем число пусков насоса за последний скользящий час
+          id: count_of_pump_starts
+          state: !lambda return (id(gs_count_of_pump_starts));
 
 output:
 #######################################################################################
@@ -349,7 +362,7 @@ packages:
     vars:
       wm_name: "Water meter 1 pulse"
       wm_id: wm1
-      GPIO_number: GPIO27
+      GPIO_number: GPIO14
       pulse_width_sensor_name: "Water meter 1 pulse period"
       total_sensor_name: "Water meter 1 total"
       flow_sensor_name: "Water meter 1 flow"
@@ -365,7 +378,7 @@ packages:
     vars:
       wm_name: "Water meter 2 pulse"
       wm_id: wm2
-      GPIO_number: GPIO14
+      GPIO_number: GPIO27
       pulse_width_sensor_name: "Water meter 2 pulse period"
       total_sensor_name: "Water meter 2 total"
       flow_sensor_name: "Water meter 2 flow"
@@ -389,6 +402,7 @@ binary_sensor:
     on_press:                                                                       # При включении реле насоса (сигнал контроля 0->1)
       then:
         - output.turn_on: led_pump_check                                            # Включить светодиод
+        - lambda: save_pump_start_time();                                           # Сохраняем текущий момент времени пуска насоса
         - lambda: id(gs_count_of_pump_starts) = check_count_of_pump_starts();       # Вычисляем число пусков насоса за последний скользящий час
         - sensor.template.publish:                                                  # Публикуем число пусков насоса за последний скользящий час
             id: count_of_pump_starts
@@ -685,7 +699,7 @@ script:
                           case 4: str = str + "Утечка воды после ГА (на потребителях) | "; break;
                           case 5: str = str + "Фильтр засорён | "; break;
                           case 6: str = str + "Реле насоса не включилось | "; break;
-                          case 7: str = str + "Число включений насоса в час более ${max_of_pump_starts} | "; break;
+                          case 7: str = str + "Более ${max_of_pump_starts} включений насоса за " + std::to_string((id(gs_pump_starts)[0] - id(gs_pump_starts)[${max_of_pump_starts}]) / 60000) + " мин | "; break;
                         }                        
                       }                      
                     }
@@ -927,6 +941,16 @@ dallas:
     update_interval: ${dallas_update_interval}
 
 sensor:
+
+#######################################################################################
+# Дельта давления на фильтре для инициации аварии (константа)
+#######################################################################################
+  - platform: template
+    name: "Delta for filter fail"
+    id: delta_for_filter_fail
+    accuracy_decimals: 1
+    update_interval: never
+
 #######################################################################################
 # Максимальный объём ГА (константа)
 #######################################################################################
