@@ -44,6 +44,19 @@ std::string seconds_to_string_hms(uint32_t seconds)
   return {buffer};
 }
 
+std::string minuts_to_string_hm(uint32_t minuts) 
+{
+  int hours = 0;
+  if (minuts > 59) 
+  {
+    hours = trunc(minuts / 60);
+    minuts = minuts - (hours * 60);
+  }
+  char buffer[5];
+  sprintf(buffer, "%02u:%02u", hours, minuts);
+  return {buffer};
+}
+
 void clear_array_of_pump_starts()
 {
   int len = sizeof(id(gs_pump_starts)) / sizeof(id(gs_pump_starts)[0]);         // Длина массива моментов времени пусков насоса

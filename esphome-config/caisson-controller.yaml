@@ -57,12 +57,19 @@ globals:
   - id: gs_heating_on       # Состояние команды включения отопления
     type: bool  
     initial_value: 'false'
-  - id: gs_pump_on          # Состояние команды включения насоса  
-    type: bool  
-    initial_value: 'false'
   - id: gs_current_tank_vloume  # Текущий объём воды в ГА в литрах
     type: int
     initial_value: '0'
+    ##################################################################################
+    # Насос
+    ##################################################################################
+  - id: gs_pump_on          # Состояние команды включения насоса  
+    type: bool  
+    initial_value: 'false'
+  - id: gs_pump_en          # Разрешение работы насоса
+    type: bool  
+    restore_value: yes  
+    initial_value: 'true'
   - id: gs_count_of_pump_starts  # Число включений насоса в час
     type: int
     initial_value: '0'
@@ -70,6 +77,9 @@ globals:
     type: uint32_t[${max_of_pump_starts} + 1]
     initial_value: '{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}'    
   - id: gs_pump_operating_time   # Продолжительность работы насоса в час в секундах
+    type: int
+    initial_value: '0'
+  - id: gs_operating_time        # Счётчик времени со сбросом каждый час в секундах
     type: int
     initial_value: '0'
   - id: gs_en_pump_fail_ctrl    # Разрешение регулярного контроля сухого хода наоса
@@ -204,6 +214,21 @@ interval:
           then:
             - lambda: id(fail_set)->execute(1);         # Авария - затопление кессона     
 
+
+#######################################################################################
+# Контроль залипания реле насоса
+#######################################################################################
+  - interval: 2s
+    then:
+      - if:              
+          condition:
+            - binary_sensor.is_on: relay_pump_check   # Если реле насоса включено
+            - lambda: return id(gs_ctrl_mode);        # Если режим внутренней автоматики
+            - lambda: return !id(gs_pump_on);         # Если команда включения насоса не подана
+          then:
+            - lambda: id(fail_set)->execute(8);       # Авария - реле насоса залипло
+
+
 #######################################################################################
 # Таймер обратного отсчёта до автовключения контроля утечки воды после ручного отключения
 #######################################################################################
@@ -214,6 +239,9 @@ interval:
           - lambda: return id(gs_no_leak_control);                            # Если контроль утечки воды отключен
         then: 
           - lambda: id(gs_time_before_leak_control_on)--;                     # Декременитруем таймер отсрочки автовключения контроля утечки воды
+          - text_sensor.template.publish:                                     # Публикуем оставшееся время до включения контроля утечки
+              id: time_before_leak_control_on
+              state: !lambda return minuts_to_string_hm(id(gs_time_before_leak_control_on));
           - if:
               condition: 
                 - lambda: return id(gs_time_before_leak_control_on) <= 0;     # Таймер завершён
@@ -221,25 +249,30 @@ interval:
                 - switch.turn_off: leak_control                               # Включаем контроль утечки (выключаем его выключение)
 
 #######################################################################################
-# Публикация и сброс счётчика времени работы насоса за фиксированный час
+# Сброс счётчика времени работы насоса за фиксированный час
 #######################################################################################
   - interval: 60min
     then:
-      - sensor.template.publish:                                # Публикуем продолжительность работы насоса в час
-          id: pump_operating_time
-          state: !lambda return (id(gs_pump_operating_time) / 60 );
       - lambda: id(gs_pump_operating_time) = 0;                 # Сбрасываем счётчик времени работы      
+      - lambda: id(gs_operating_time) = 0;                      # Сбрасываем счётчик времени
+      - sensor.template.publish:                                # Публикуем продолжительность работы насоса в час в минутах (для графика)
+          id: pump_operating_time
+          state: !lambda return id(gs_pump_operating_time) / 60;
 
 #######################################################################################
 # Время работы насоса
 #######################################################################################
   - interval: 1s
     then:
+      - lambda: id(gs_operating_time)++;                              # Инкрементируем счётчик времени
       - if:
           condition:
-            - binary_sensor.is_on: relay_pump_check   # Если реле насоса влючено
+            - binary_sensor.is_on: relay_pump_check                   # Если реле насоса влючено
           then:
-            - lambda: id(gs_pump_operating_time)++;   # Инкрементируем счётчик времени работы насоса
+            - lambda: id(gs_pump_operating_time)++;                   # Инкрементируем счётчик времени работы насоса
+            - text_sensor.template.publish:                           # Публикуем продолжительность работы насоса в час
+                id: pump_operating_time_ms
+                state: !lambda return minuts_to_string_hm(id(gs_pump_operating_time)) + " из " + minuts_to_string_hm(id(gs_operating_time));
 
 #######################################################################################
 # Контроль сухого хода насоса
@@ -263,6 +296,7 @@ interval:
       - sensor.template.publish:                                                  # Публикуем число пусков насоса за последний скользящий час
           id: count_of_pump_starts
           state: !lambda return (id(gs_count_of_pump_starts));
+
 
 output:
 #######################################################################################
@@ -539,7 +573,7 @@ button:
     id: but_toggle_manual_heating
     on_press: 
       then:
-        - script.execute: toggle_manual_heating        
+        - script.execute: toggle_manual_heating    
 
 number:
 #######################################################################################
@@ -595,9 +629,15 @@ switch:
     turn_on_action:
       - lambda:  id(gs_no_leak_control) = true;
       - lambda: id(gs_time_before_leak_control_on) = id(period_without_leak_control).state * 60;
+      - text_sensor.template.publish:                                     # Публикуем оставшееся время до включения контроля утечки
+          id: time_before_leak_control_on
+          state: !lambda return minuts_to_string_hm(id(gs_time_before_leak_control_on));
     turn_off_action:
       - lambda:  id(gs_no_leak_control) = false;
       - lambda: id(gs_time_before_leak_control_on) = 0;
+      - text_sensor.template.publish:                                     # Публикуем оставшееся время до включения контроля утечки
+          id: time_before_leak_control_on
+          state: !lambda return minuts_to_string_hm(id(gs_time_before_leak_control_on));
     optimistic: true
 
 #######################################################################################
@@ -615,6 +655,21 @@ switch:
     optimistic: true
     restore_mode: DISABLED 
     # по дефолту restore_mode: ALWAYS_OFF, и без DISABLED сбивался на ноль gs_ctrl_mode при загрузке
+
+#######################################################################################
+# Переключатель в интерфейсе HA разрешения работы насоса
+#######################################################################################
+  - platform: template
+    name: "Pump enable"
+    lambda: return id(gs_pump_en);
+    turn_on_action:
+      - lambda:  id(gs_pump_en) = true;
+      - script.execute: pressure_control      # Проверяем давление и включаем насос при необходимости
+    turn_off_action:
+      - lambda:  id(gs_pump_en) = false;
+      - script.execute: pump_off              # Выключаем насос
+    optimistic: true
+    restore_mode: DISABLED 
 
 script:
 #######################################################################################
@@ -666,12 +721,12 @@ script:
 #      - lambda: 'ESP_LOGI("Вход", "gs_fail_code = %d", id(gs_fail_code));'          
       - if:
           condition:
-            - lambda: return error_code > 0;            # Если сейчас не инициализация устройства (и не восстановление кода ошибок из флэшки) и не сброс кода ошибок
+            - lambda: return error_code > 0;                      # Если сейчас не инициализация устройства (и не восстановление кода ошибок из флэшки) и не сброс кода ошибок
           then:
             - lambda: id(gs_fail_code) = id(gs_fail_code) | (1 << (error_code - 1));    # Запоминаем бит ошибки в глобальной переменной
       - if:
           condition:
-            - lambda: return error_code == 0;           # Если нужно выполнить сброс ошибок (код 0 - нет аварии)
+            - lambda: return error_code == 0;                     # Если нужно выполнить сброс ошибок (код 0 - нет аварии)
           then:
             - if: 
                 condition:
@@ -682,24 +737,24 @@ script:
                   - sensor.template.publish:                      # Публикуем число пусков насоса
                       id: count_of_pump_starts
                       state: !lambda return (id(gs_count_of_pump_starts));
-            - lambda: id(gs_fail_code) = 0;             # Сбрасываем код ошибок в глобальной переменной
-            - output.turn_off: relay_fail               # Выключаем реле аварии
-            - output.turn_off: led_fail                 # Выключаем светодиод аварии
-            - text_sensor.template.publish:             # Публикуем текст расшифровки кода отсутствия аварии
+            - lambda: id(gs_fail_code) = 0;                       # Сбрасываем код ошибок в глобальной переменной
+            - output.turn_off: relay_fail                         # Выключаем реле аварии
+            - output.turn_off: led_fail                           # Выключаем светодиод аварии
+            - text_sensor.template.publish:                       # Публикуем текст расшифровки кода отсутствия аварии
                 id: text_error_code
                 state: "Нет аварии"
-            - script.execute: pressure_control          # Проверяем давление и включаем насос при необходимости
-          else:                                         # Иначе сейчас авария или восстановление кода ошибки из флэшки при включении питания
-            - output.turn_on: relay_fail                # Включаем реле аварии
-            - output.turn_on: led_fail                  # Включаем светодиод аварии
-            - script.execute: pump_off                  # Выключаем насос (снимаем команду включения, это не обязательно, так как реле аварии прерывает команду физически, только чтобы светодиод "включение насоса" не горел)
-            - text_sensor.template.publish:             # Публикуем текст расшифровки кода наличия аварии
+            - script.execute: pressure_control                    # Проверяем давление и включаем насос при необходимости
+          else:                                                   # Иначе сейчас авария или восстановление кода ошибки из флэшки при включении питания
+            - output.turn_on: relay_fail                          # Включаем реле аварии
+            - output.turn_on: led_fail                            # Включаем светодиод аварии
+            - script.execute: pump_off                            # Выключаем насос (снимаем команду включения, это не обязательно, так как реле аварии прерывает команду физически, только чтобы светодиод "включение насоса" не горел)
+            - text_sensor.template.publish:                       # Публикуем текст расшифровки кода наличия аварии
                 id: text_error_code
                 state: !lambda |-
                   std::string str = "";
-                  for (int i = 0; i < 7; i++)           // Цикл по всем возможным битам ошибок
+                  for (int i = 0; i < 8; i++)                     // Цикл по всем возможным битам ошибок
                     {
-                      if ((id(gs_fail_code) >> i) & 1)  // Если данный бит установлен, конкатенируем текст ошибки к общему тексту всех ошибок
+                      if ((id(gs_fail_code) >> i) & 1)            // Если данный бит установлен, конкатенируем текст ошибки к общему тексту всех ошибок
                       {
                         switch (i + 1) {
                           case 1: str = str + "Вода на дне кессона | "; break;
@@ -709,14 +764,15 @@ script:
                           case 5: str = str + "Фильтр засорён | "; break;
                           case 6: str = str + "Реле насоса не включилось | "; break;
                           case 7: str = str + "Более ${max_of_pump_starts} включений насоса за " + std::to_string((id(gs_pump_starts)[0] - id(gs_pump_starts)[${max_of_pump_starts}]) / 60000) + " мин | "; break;
+                          case 8: str = str + "Реле насоса залипло | "; break;
                         }                        
                       }                      
                     }
-                    str.pop_back();                       // Удаляем три последних символа " | "
+                    str.pop_back();                               // Удаляем три последних символа " | "
                     str.pop_back();
                     str.pop_back();
                     return {str};
-      - sensor.template.publish:                        # Публикуем код аварии
+      - sensor.template.publish:                                  # Публикуем код аварии
           id: fail_code
           state: !lambda return id(gs_fail_code);
 
@@ -755,6 +811,7 @@ script:
                 id(gs_total_wm2) = 0;
                 id(maximum_pressure).state = 3.5;
                 id(minimum_pressure).state = 2.5;
+                id(gs_pump_en) = true;
             - script.execute: set_ctrl_mode            
             - repeat:                                       # Трижды мигаем красным светодиодом в подтверждение сброса #
                 count: 3                                                                                               #
@@ -843,6 +900,7 @@ script:
         condition:
           - lambda: return !id(gs_init_time);             # Если сейчас не инициализация устройства
           - lambda: return id(gs_fail_code) == 0;         # Если сейчас нет аварии
+          - lambda: return id(gs_pump_en);                # Если работа насоса разрешена
         then:
           - output.turn_on: relay_pump                    # Включаем насос (подаём команду включения)
           - output.turn_on: led_pump_on                   # Включаем светодиод
@@ -943,6 +1001,20 @@ text_sensor:
     id: text_error_code
 
 #######################################################################################
+# Остаток времени до возобновления контроля утечки
+#######################################################################################
+  - platform: template
+    name: "Time before leak control on"
+    id: time_before_leak_control_on
+    
+#######################################################################################
+# Продолжительность работы насоса в час в м:с
+#######################################################################################
+  - platform: template
+    name: "Pump operating time per hour"
+    id: pump_operating_time_ms
+
+#######################################################################################
 # Температурные датчики
 #######################################################################################
 dallas:
@@ -950,7 +1022,6 @@ dallas:
     update_interval: ${dallas_update_interval}
 
 sensor:
-
 #######################################################################################
 # Дельта давления на фильтре для инициации аварии (константа)
 #######################################################################################
@@ -1004,13 +1075,13 @@ sensor:
     accuracy_decimals: 0    
 
 #######################################################################################
-# Продолжительность работы насоса в час
+# Продолжительность работы насоса в час в минутах
 #######################################################################################
   - platform: template
     name: "Pump operating time per hour"
     id: pump_operating_time
     unit_of_measurement: "мин"
-    accuracy_decimals: 0    
+    accuracy_decimals: 0
 
 ######################################################################################
 # Датчики температуры
