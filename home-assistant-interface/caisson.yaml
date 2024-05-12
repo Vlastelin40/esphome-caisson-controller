@@ -1,0 +1,129 @@
+template:
+  - sensor:
+    - name: "caisson_pump_state"
+      state: >
+        {% if states("sensor.caisson_controller_fail_code") == "unknown" or
+              is_state("sensor.caisson_controller_fail_code", "unavailable") or
+              states("sensor.caisson_controller_fail_code") | int | bitwise_and(2) == 2 %}
+          fail
+        {% elif (states("sensor.caisson_controller_fail_code") | int | bitwise_and(64)) == 64 %}
+          starts
+        {% else %}  
+          ok
+        {% endif %}
+
+    - name: "caisson_pump_relay_state"
+      state: >
+        {% if states("sensor.caisson_controller_fail_code") == "unknown" or
+              is_state("sensor.caisson_controller_fail_code", "unavailable") or
+              states("sensor.caisson_controller_fail_code") | int | bitwise_and(32) == 32 or
+              states("sensor.caisson_controller_fail_code") | int | bitwise_and(128) == 128 %}
+          fail
+        {% elif states("binary_sensor.caisson_controller_pump_state") | bool %}
+          on
+        {% else %}
+          off
+        {% endif %}
+
+    - name: "caisson_water_volume_in_tank"
+      state: >
+        {% if states("sensor.caisson_controller_water_volume_in_tank") == "unknown" or 
+              is_state("sensor.caisson_controller_water_volume_in_tank", "unavailable") %}
+          0
+        {% else %}  
+          {{ (states("sensor.caisson_controller_water_volume_in_tank")|int / states("sensor.caisson_controller_max_tank_volume")|int * 10)|int }}
+        {% endif %}
+
+    - name: "caisson_flow1_state"
+      state: >
+        {% if states("sensor.caisson_controller_fail_code") == "unknown" or
+              is_state("sensor.caisson_controller_fail_code", "unavailable") or
+              states("sensor.caisson_controller_fail_code") | int | bitwise_and(4) == 4 %}
+          fail
+        {% elif (states("sensor.caisson_controller_water_meter_1_flow")|float > 0) %}
+          on
+        {% else %}  
+          off
+        {% endif %}
+
+    - name: "caisson_flow2_state"
+      state: >
+        {% if states("sensor.caisson_controller_fail_code") == "unknown" or
+              is_state("sensor.caisson_controller_fail_code", "unavailable") or
+              states("sensor.caisson_controller_fail_code") | int | bitwise_and(8) == 8 %}
+          fail
+        {% elif (states("sensor.caisson_controller_water_meter_2_flow")|float > 0) %}
+          on
+        {% else %}  
+          off
+        {% endif %}
+        
+    - name: "caisson_filter_delta"
+      state: '{{ states("sensor.caisson_controller_pressure_before_filter") | float - states("sensor.caisson_controller_pressure_after_filter") | float }}'
+      unit_of_measurement: бар
+
+    - name: "caisson_filter_state"
+      state: >
+        {% if states("sensor.caisson_controller_fail_code") == "unknown" or
+              is_state("sensor.caisson_controller_fail_code", "unavailable") or
+              is_state("sensor.caisson_filter_delta", "unavailable") or
+              states("sensor.caisson_controller_fail_code") | int | bitwise_and(16) == 16 %}
+          fail
+        {% elif (states("sensor.caisson_filter_delta") | float > 0) and (states("sensor.caisson_filter_delta") | float <  states("sensor.caisson_controller_delta_for_filter_fail") | float - 0.1) %}
+          ok
+        {% elif (states("sensor.caisson_filter_delta") | float >=  states("sensor.caisson_controller_delta_for_filter_fail") | float - 0.1) %}
+          warning
+        {% else %}  
+          off
+        {% endif %}
+
+    - name: "caisson_pressure1_state"
+      state: >
+        {% if is_state("sensor.caisson_controller_pressure_before_filter", "unavailable") %}
+          off
+        {% elif states("sensor.caisson_controller_pressure_before_filter") | float  == 0 %}
+          fail
+        {% elif states("sensor.caisson_controller_pressure_before_filter") | float > 0 %}
+          on
+        {% endif %}
+
+    - name: "caisson_pressure2_state"
+      state: >
+        {% if is_state("sensor.caisson_controller_pressure_after_filter", "unavailable") %}
+          off
+        {% elif states("sensor.caisson_controller_pressure_after_filter") | float  == 0 %}
+          fail
+        {% elif states("sensor.caisson_controller_pressure_after_filter") | float > 0 %}
+          on
+        {% endif %}
+
+    - name: "caisson_pressure3_state"
+      state: >
+        {% if is_state("sensor.caisson_controller_pressure_after_reducer", "unavailable") %}
+          off
+        {% elif states("sensor.caisson_controller_pressure_after_reducer") | float  == 0 %}
+          fail
+        {% elif states("sensor.caisson_controller_pressure_after_reducer") | float > 0 %}
+          on
+        {% endif %}
+
+    - name: "caisson_flooding_state"
+      state: >
+        {% if states("sensor.caisson_controller_fail_code") == "unknown" or
+              is_state("sensor.caisson_controller_fail_code", "unavailable") or
+              states("sensor.caisson_controller_fail_code") | int | bitwise_and(1) != 1 %}
+          no
+        {% else %}  
+          yes
+        {% endif %}
+        
+# in sensor.yaml which is included in configuration.yaml
+# Fake Sensor to give a blank for state-label in picture-elements card
+sensor:
+  - platform: template
+    sensors:
+      blank_blank:
+        friendly_name: "Blank Blank"
+        value_template: " "        
+
+        

@@ -1,0 +1,518 @@
+title: Кессон
+path: caisson
+icon: mdi:water-pump
+cards:
+  - type: picture-elements
+    image: /local/caisson/base.png
+    elements:
+      - type: image
+        entity: switch.caisson_controller_control_mode
+        state_image:
+          "on": /local/caisson/automatic_internal.png
+          "off": /local/caisson/automatic_external.png
+          unknown: /local/caisson/automatic_internal.png
+          unavailable: /local/caisson/automatic_internal.png
+        style:
+          top: 50%
+          left: 50%
+          width: 100%
+      - type: image
+        entity: sensor.caisson_flooding_state
+        state_image:
+          "no": /local/caisson/flooding_no.png
+          "yes": /local/caisson/flooding_yes.png
+        style:
+          top: 50%
+          left: 50%
+          width: 100%
+      - type: image
+        entity: binary_sensor.caisson_controller_heating
+        state_image:
+          "on": /local/caisson/heater_on.png
+          "off": /local/caisson/heater_off.png
+          unavailable: /local/caisson/heater_off.png
+        style:
+          top: 50%
+          left: 50%
+          width: 100%
+      - type: image
+        entity: binary_sensor.caisson_controller_heating_manual
+        state_image:
+          "on": /local/caisson/heater_manual.png
+          "off": /local/caisson/heater_off.png
+          unavailable: /local/caisson/heater_off.png
+        style:
+          top: 50%
+          left: 50%
+          width: 100%
+      - type: image
+        entity: sensor.caisson_water_volume_in_tank
+        state_image:
+          "0": /local/caisson/tank_0.png
+          "1": /local/caisson/tank_10.png
+          "2": /local/caisson/tank_20.png
+          "3": /local/caisson/tank_30.png
+          "4": /local/caisson/tank_40.png
+          "5": /local/caisson/tank_50.png
+          "6": /local/caisson/tank_60.png
+          "7": /local/caisson/tank_70.png
+          "8": /local/caisson/tank_80.png
+          "9": /local/caisson/tank_90.png
+          "10": /local/caisson/tank_100.png
+        style:
+          top: 50%
+          left: 50%
+          width: 100%
+      - type: state-label
+        entity: sensor.caisson_controller_water_volume_in_tank
+        style:
+          top: 34%
+          left: 50.8%
+      - type: state-label
+        entity: sensor.caisson_controller_water_meter_1_flow
+        style:
+          transform: none
+          top: 54.6%
+          left: 9%
+      - type: state-label
+        entity: sensor.caisson_controller_water_meter_2_flow
+        style:
+          transform: none
+          top: 28.3%
+          left: 70%
+      - type: state-label
+        entity: sensor.caisson_controller_pressure_before_filter
+        style:
+          transform: none
+          top: 48.2%
+          left: 13%
+      - type: state-label
+        entity: sensor.caisson_controller_pressure_after_filter
+        style:
+          transform: none
+          top: 34.6%
+          left: 74%
+      - type: state-label
+        entity: sensor.caisson_controller_pressure_after_reducer
+        style:
+          transform: none
+          top: 55.8%
+          left: 74%
+      - type: state-label
+        entity: sensor.caisson_filter_delta
+        prefix: "Дельта "
+        style:
+          top: 39%
+          left: 24.5%
+      - type: image
+        entity: sensor.caisson_pump_state
+        state_image:
+          fail: /local/caisson/pump_fail.png
+          starts: /local/caisson/pump_fail_starts.png
+          ok: /local/caisson/pump_ok.png
+        style:
+          top: 50%
+          left: 50%
+          width: 100%
+      - type: image
+        entity: sensor.caisson_flow1_state
+        state_image:
+          fail: /local/caisson/flow1_fail.png
+          "off": /local/caisson/flow1_off.png
+          "on": /local/caisson/flow1_on.png
+        style:
+          top: 50%
+          left: 50%
+          width: 100%
+      - type: image
+        entity: binary_sensor.caisson_controller_water_meter_1_pulse
+        state_image:
+          "off": /local/caisson/meter1_on.png
+          "on": /local/caisson/meter1_off.png
+          unavailable: /local/caisson/meter1_off.png
+        style:
+          top: 50%
+          left: 50%
+          width: 100%
+      - type: image
+        entity: sensor.caisson_flow2_state
+        state_image:
+          fail: /local/caisson/flow2_fail.png
+          "off": /local/caisson/flow2_off.png
+          "on": /local/caisson/flow2_on.png
+        style:
+          top: 50%
+          left: 50%
+          width: 100%
+      - type: image
+        entity: binary_sensor.caisson_controller_water_meter_2_pulse
+        state_image:
+          "off": /local/caisson/meter2_on.png
+          "on": /local/caisson/meter2_off.png
+          unavailable: /local/caisson/meter2_off.png
+        style:
+          top: 50%
+          left: 50%
+          width: 100%
+      - type: image
+        entity: sensor.caisson_filter_state
+        state_image:
+          ok: /local/caisson/filter_ok.png
+          "off": /local/caisson/filter_off.png
+          warning: /local/caisson/filter_warning.png
+          fail: /local/caisson/filter_fail.png
+        style:
+          top: 50%
+          left: 50%
+          width: 100%
+      - type: image
+        entity: sensor.caisson_pressure1_state
+        state_image:
+          "on": /local/caisson/pressure1_on.png
+          "off": /local/caisson/pressure1_off.png
+          fail: /local/caisson/pressure1_fail.png
+        style:
+          top: 50%
+          left: 50%
+          width: 100%
+      - type: image
+        entity: sensor.caisson_pressure2_state
+        state_image:
+          "on": /local/caisson/pressure2_on.png
+          "off": /local/caisson/pressure2_off.png
+          fail: /local/caisson/pressure2_fail.png
+        style:
+          top: 50%
+          left: 50%
+          width: 100%
+      - type: image
+        entity: sensor.caisson_pressure3_state
+        state_image:
+          "on": /local/caisson/pressure3_on.png
+          "off": /local/caisson/pressure3_off.png
+          fail: /local/caisson/pressure3_fail.png
+        style:
+          top: 50%
+          left: 50%
+          width: 100%
+      - type: image
+        entity: sensor.caisson_pump_relay_state
+        state_image:
+          "on": /local/caisson/pump_relay_on.png
+          "off": /local/caisson/pump_relay_off.png
+          fail: /local/caisson/pump_relay_fail.png
+        style:
+          top: 50%
+          left: 50%
+          width: 100%
+      - type: state-label
+        entity: sensor.caisson_controller_under_cover
+        suffix: " под крышкой"
+        style:
+          transform: none
+          top: 0%
+          left: 65%
+      - type: state-label
+        entity: sensor.caisson_controller_under_shoulders
+        suffix: " под плечами"
+        style:
+          transform: none
+          top: 4%
+          left: 65%
+      - type: state-label
+        entity: sensor.caisson_controller_top_water_pipe
+        suffix: " сверху труб"
+        style:
+          transform: none
+          top: 8%
+          left: 65%
+          font-weight: bold
+      - type: state-label
+        entity: sensor.caisson_controller_bottom_water_pipe
+        suffix: " снизу труб"
+        style:
+          transform: none
+          top: 12%
+          left: 65%
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: Скважинный кессон
+        style:
+          transform: none
+          top: 1%
+          left: 1%
+          font-family: Tahoma
+          font-size: 130%
+          font-weight: bold
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: Насос
+        style:
+          transform: none
+          top: 93%
+          left: 10%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: Реле насоса
+        style:
+          top: 85%
+          left: 25%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: Поплавковый
+        style:
+          top: 89%
+          left: 44%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: выключатель
+        style:
+          top: 92%
+          left: 44%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: Электрический
+        style:
+          top: 81%
+          left: 83%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: обогреватель
+        style:
+          top: 84%
+          left: 83%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: Фильтр
+        style:
+          top: 14%
+          left: 24%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: BB20
+        style:
+          top: 17%
+          left: 24%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: Резервная
+        style:
+          top: 10%
+          left: 51.5%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: (внешняя)
+        style:
+          top: 13%
+          left: 51.5%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: автоматика
+        style:
+          top: 16%
+          left: 51.5%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: Гидро-
+        style:
+          top: 48%
+          left: 51%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: аккумулятор
+        style:
+          top: 51%
+          left: 51%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: (ГА)
+        style:
+          top: 54%
+          left: 51%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: Редуктор
+        style:
+          transform: none
+          top: 43%
+          left: 74%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: давления
+        style:
+          transform: none
+          top: 46%
+          left: 74%
+          color: gainsboro
+      - type: state-label
+        entity: sensor.blank_blank
+        prefix: <- Зимний Водопровод Летний ->
+        style:
+          top: 72%
+          left: 68%
+          color: gainsboro
+  - type: vertical-stack
+    cards:
+      - type: entities
+        entities:
+          - entity: sensor.caisson_controller_fail
+          - entity: sensor.caisson_controller_fail_code
+          - entity: button.caisson_controller_fail_reset
+        show_header_toggle: false
+        state_color: true
+        card_mod:
+          style:
+            .: |
+              #states > * {
+                  margin: -10px 0px !important;
+              }
+      - type: entities
+        entities:
+          - entity: switch.caisson_controller_disabling_water_leakage_control
+            name: Отключить контроль утечки
+          - entity: number.caisson_controller_period_without_leakage_control
+            name: На время
+          - entity: sensor.caisson_controller_time_before_leak_control_on
+        show_header_toggle: false
+        state_color: true
+        card_mod:
+          style:
+            .: |
+              #states > * {
+                  margin: -10px 0px !important;
+              }
+      - type: entities
+        entities:
+          - entity: sensor.caisson_controller_water_volume_in_tank
+          - entity: sensor.caisson_controller_max_tank_volume
+          - entity: number.caisson_controller_maximum_pressure
+          - entity: number.caisson_controller_minimum_pressure
+        show_header_toggle: false
+        state_color: true
+        card_mod:
+          style:
+            .: |
+              #states > * {
+                  margin: -10px 0px !important;
+              }      
+      - type: entities
+        entities:
+          - entity: sensor.caisson_controller_pressure_delta_in_filter
+          - entity: sensor.caisson_controller_delta_for_filter_fail
+        card_mod:
+          style:
+            .: |
+              #states > * {
+                  margin: -10px 0px !important;
+              }          
+  - type: vertical-stack
+    cards:
+      - type: entities
+        entities:
+          - entity: switch.caisson_controller_control_mode
+          - entity: switch.caisson_controller_pump_enable
+          - entity: binary_sensor.caisson_controller_pump
+          - entity: binary_sensor.caisson_controller_pump_state
+          - entity: sensor.caisson_controller_pump_operating_time_per_hour
+          - entity: sensor.caisson_controller_pump_operating_time_per_hour_2
+          - entity: sensor.caisson_controller_ount_of_pump_starts_per_hour
+        state_color: true
+        card_mod:
+          style:
+            .: |
+              #states > * {
+                  margin: -10px 0px !important;
+              }    
+      - type: history-graph
+        entities:
+          - entity: sensor.caisson_controller_pump_operating_time_per_hour_2
+            name: Продолжительность работы насоса в час
+        hours_to_show: 190
+  - type: entities
+    entities:
+      - entity: binary_sensor.caisson_controller_heating
+      - entity: button.caisson_controller_toggle_manual_heating
+      - entity: binary_sensor.caisson_controller_heating_manual
+    state_color: true
+    card_mod:
+      style:
+        .: |
+          #states > * {
+              margin: -10px 0px !important;
+          }
+  - type: history-graph
+    entities:
+      - entity: sensor.caisson_controller_under_cover
+      - entity: sensor.caisson_controller_under_shoulders
+      - entity: sensor.caisson_controller_bottom_water_pipe
+      - entity: sensor.caisson_controller_top_water_pipe
+    hours_to_show: 120
+    title: Температура в кессоне
+  - type: entities
+    entities:
+      - entity: sensor.caisson_controller_water_meter_1_flow
+      - entity: sensor.caisson_controller_water_meter_2_flow
+      - entity: binary_sensor.caisson_controller_water_meter_1_pulse
+      - entity: binary_sensor.caisson_controller_water_meter_2_pulse
+      - entity: sensor.caisson_controller_water_meter_1_pulse_period
+      - entity: sensor.caisson_controller_water_meter_2_pulse_period
+      - entity: sensor.caisson_controller_water_meter_1_total
+      - entity: sensor.caisson_controller_water_meter_2_total
+      - entity: sensor.caisson_controller_water_meter_1_uniform_flow
+      - entity: sensor.caisson_controller_water_meter_2_uniform_flow
+      - entity: sensor.caisson_controller_water_meter_1_zero_flow
+      - entity: sensor.caisson_controller_water_meter_2_zero_flow
+    title: Поток воды (1 - в бак, 2 - из бака)
+    card_mod:
+      style:
+        .: |
+          #states > * {
+              margin: -10px 0px !important;
+          }
+  - type: entities
+    entities:
+      - entity: sensor.caisson_controller_pressure_before_filter
+      - entity: sensor.caisson_controller_pressure_after_filter
+      - entity: sensor.caisson_controller_pressure_after_reducer
+      - entity: sensor.caisson_controller_pressure_before_filter_precise
+      - entity: sensor.caisson_controller_pressure_after_filter_precise
+      - entity: sensor.caisson_controller_pressure_after_reducer_precise
+      - entity: sensor.caisson_controller_pressure_before_filter_adc
+      - entity: sensor.caisson_controller_pressure_after_filter_adc
+      - entity: sensor.caisson_controller_pressure_after_reducer_adc
+    title: Давление воды
+    card_mod:
+      style:
+        .: |
+          #states > * {
+              margin: -10px 0px !important;
+          }
+  - type: history-graph
+    entities:
+      - entity: sensor.caisson_controller_pressure_before_filter
+      - entity: sensor.caisson_controller_pressure_after_filter
+      - entity: sensor.caisson_controller_pressure_after_reducer
+      - entity: sensor.caisson_controller_water_volume_in_tank
+      - entity: sensor.caisson_controller_pressure_delta_in_filter
+      - entity: sensor.caisson_controller_ount_of_pump_starts_per_hour
+    hours_to_show: 24
+type: custom:horizontal-layout
+layout:
+  max_cols: 4
+visible:
+  - user: 1c6386b1fe9949dc83ede1aa9db9c345
