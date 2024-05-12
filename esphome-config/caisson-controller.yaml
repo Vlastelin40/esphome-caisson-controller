@@ -66,7 +66,7 @@ globals:
   - id: gs_pump_on          # Состояние команды включения насоса  
     type: bool  
     initial_value: 'false'
-  - id: gs_pump_en          # Разрешение работы насоса
+  - id: gs_pump_en          # Разрешение работы насоса при работе от внутренней автоматики
     type: bool  
     restore_value: yes  
     initial_value: 'true'
@@ -178,7 +178,6 @@ esphome:
          id: delta_for_filter_fail
          state: ${delta_for_filter_fail}         
       - lambda: id(gs_init_time) = false;               # Сбрасываем флаг времени инициализации устройства
-      - script.execute: pressure_control                # Проверяем давление и включаем насос при необходимости
 
 interval:
 #######################################################################################
@@ -210,10 +209,9 @@ interval:
       - if:
           condition:
             - binary_sensor.is_off: relay_fail_check    # Если реле аварии включено (инверсная логика)
-            - lambda: return !(id(gs_fail_code) & 1 );  # Если бит аварии затопления сброшен
+            - lambda: return id(gs_fail_code) == 0 ;    # Если нет аварии
           then:
             - lambda: id(fail_set)->execute(1);         # Авария - затопление кессона     
-
 
 #######################################################################################
 # Контроль залипания реле насоса
@@ -253,11 +251,11 @@ interval:
 #######################################################################################
   - interval: 60min
     then:
-      - lambda: id(gs_pump_operating_time) = 0;                 # Сбрасываем счётчик времени работы      
-      - lambda: id(gs_operating_time) = 0;                      # Сбрасываем счётчик времени
       - sensor.template.publish:                                # Публикуем продолжительность работы насоса в час в минутах (для графика)
           id: pump_operating_time
           state: !lambda return id(gs_pump_operating_time) / 60;
+      - lambda: id(gs_pump_operating_time) = 0;                 # Сбрасываем счётчик времени работы      
+      - lambda: id(gs_operating_time) = 0;                      # Сбрасываем счётчик времени
 
 #######################################################################################
 # Время работы насоса
@@ -270,9 +268,9 @@ interval:
             - binary_sensor.is_on: relay_pump_check                   # Если реле насоса влючено
           then:
             - lambda: id(gs_pump_operating_time)++;                   # Инкрементируем счётчик времени работы насоса
-            - text_sensor.template.publish:                           # Публикуем продолжительность работы насоса в час
-                id: pump_operating_time_ms
-                state: !lambda return minuts_to_string_hm(id(gs_pump_operating_time)) + " из " + minuts_to_string_hm(id(gs_operating_time));
+      - text_sensor.template.publish:                                 # Публикуем продолжительность работы насоса в час
+          id: pump_operating_time_ms
+          state: !lambda return minuts_to_string_hm(id(gs_pump_operating_time)) + " из " + minuts_to_string_hm(id(gs_operating_time));
 
 #######################################################################################
 # Контроль сухого хода насоса
@@ -475,7 +473,7 @@ binary_sensor:
       then:
         - if: 
             condition:
-              - lambda: return !(id(gs_fail_code) & 1 );  # Если бит аварии затопления сброшен, значит реле аварии включено лягушкой
+              - lambda: return id(gs_fail_code) == 0 ;  # Если нет аварии
             then:
               - lambda: id(fail_set)->execute(1);       # Авария - затопление кессона
           
@@ -594,7 +592,6 @@ number:
   - platform: template
     name: "Maximum pressure"
     id: maximum_pressure
-    unit_of_measurement: "бар"
     min_value: 2.7
     max_value: 3.7
     step: 0.1
@@ -609,7 +606,6 @@ number:
   - platform: template
     name: "Minimum pressure"
     id: minimum_pressure
-    unit_of_measurement: "бар"
     min_value: 1.7
     max_value: 2.7
     step: 0.1
@@ -649,9 +645,11 @@ switch:
     turn_on_action:
       - lambda:  id(gs_ctrl_mode) = true;
       - output.turn_on: led_mode
+      - script.execute: set_ctrl_mode                     # Переключаем режим
     turn_off_action:
       - lambda:  id(gs_ctrl_mode) = false;
       - output.turn_off: led_mode
+      - script.execute: set_ctrl_mode                     # Переключаем режим
     optimistic: true
     restore_mode: DISABLED 
     # по дефолту restore_mode: ALWAYS_OFF, и без DISABLED сбивался на ноль gs_ctrl_mode при загрузке
@@ -775,7 +773,6 @@ script:
       - sensor.template.publish:                                  # Публикуем код аварии
           id: fail_code
           state: !lambda return id(gs_fail_code);
-
 
 #######################################################################################
 # Установка режима автоматики, 1 - от данного контроллера (внутренняя), 0 - от внешнего реле давления (внешняя)
@@ -972,25 +969,20 @@ script:
   - id: toggle_manual_heating
     then:
       - if:
-          condition:
-            - lambda: return id(gs_fail_code) == 0;             # Если сейчас нет аварии
-          then: 
-            if:
-              condition: 
-                - lambda: return !id(gs_heating_on);            # Если отопление выключено
-              then:
-                - script.execute: heater_on                     # ВКЛЮЧЕНИЕ ОТОПЛЕНИЯ ВРУЧНУЮ
-                - lambda: id(gs_manual_heating) = true;         # Запоминаем факт включения отопления вручную
-                - output.set_level:                             # Включаем мигание светодиода как индикацию ручного режима отопления
-                    id: led_heater
-                    level: "50%"                                # Мигание со скважностью 0.5
-              else:   
-                - output.set_level:                             # Отключаем мигание, при автовключении отопления по датчикам температуры будет гореть непрерывно
-                    id: led_heater
-                    level: "100%"                               # Мигание со скважностью 1 (нет мигания)
-                - script.execute: heater_off                    # Выключаем отопление
-                - lambda: id(gs_manual_heating) = false;        # Сбрасываем флаг ручного отопления
-
+          condition: 
+            - lambda: return !id(gs_heating_on);            # Если отопление выключено
+          then:
+            - script.execute: heater_on                     # ВКЛЮЧЕНИЕ ОТОПЛЕНИЯ ВРУЧНУЮ
+            - lambda: id(gs_manual_heating) = true;         # Запоминаем факт включения отопления вручную
+            - output.set_level:                             # Включаем мигание светодиода как индикацию ручного режима отопления
+                id: led_heater
+                level: "50%"                                # Мигание со скважностью 0.5
+          else:   
+            - output.set_level:                             # Отключаем мигание, при автовключении отопления по датчикам температуры будет гореть непрерывно
+                id: led_heater
+                level: "100%"                               # Мигание со скважностью 1 (нет мигания)
+            - script.execute: heater_off                    # Выключаем отопление
+            - lambda: id(gs_manual_heating) = false;        # Сбрасываем флаг ручного отопления
 
 text_sensor:
 #######################################################################################
@@ -1028,6 +1020,7 @@ sensor:
   - platform: template
     name: "Delta for filter fail"
     id: delta_for_filter_fail
+    unit_of_measurement: "бар"
     accuracy_decimals: 1
     update_interval: never
 
@@ -1037,6 +1030,7 @@ sensor:
   - platform: template
     name: "Max tank volume"
     id: max_tank_volume
+    unit_of_measurement: "л"
     accuracy_decimals: 0
     update_interval: never
 
@@ -1072,6 +1066,7 @@ sensor:
   - platform: template
     name: "Сount of pump starts per hour"
     id: count_of_pump_starts
+    unit_of_measurement: "раз"
     accuracy_decimals: 0    
 
 #######################################################################################
@@ -1089,14 +1084,17 @@ sensor:
   - platform: dallas                # 1 - Под крышкой кесона
     name: "Under cover"
     id: t_under_cover
+    unit_of_measurement: "°C"
     address: "0x5b3ca0f649249a28"
   - platform: dallas                # 2 - Под плечами кессона
     name: "Under shoulders"
     id: t_under_shoulders
+    unit_of_measurement: "°C"
     address: "0x1111111111111112"
   - platform: dallas                # 3 - Верхняя точка водопровода
     name: "Top water pipe"
     id: t_top_water_pipe
+    unit_of_measurement: "°C"
     address: "0x1111111111111113"
     on_value: 
       then:
@@ -1104,6 +1102,7 @@ sensor:
   - platform: dallas                # 4 - Нижняя точка водопровода
     name: "Bottom water pipe"
     id: t_bottom_water_pipe
+    unit_of_measurement: "°C"
     address: "0x1111111111111114"
 
 
