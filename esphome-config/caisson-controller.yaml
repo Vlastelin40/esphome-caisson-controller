@@ -306,7 +306,7 @@ interval:
               state: !lambda return minuts_to_string_hm(id(gs_pump_operating_time)) + " из " + minuts_to_string_hm(id(gs_operating_time));
 
 #######################################################################################
-# Контроль сухого хода насоса
+# Контроль сухого хода насоса и работы в стенку (работа насоса при наличии давления и отсутствии потока)
 #######################################################################################
   - interval: 5s
     then:
@@ -317,7 +317,13 @@ interval:
             - binary_sensor.is_on: relay_pump_check     # Если реле насоса влючено
             - lambda: return id(wm1_flow).state == 0;   # Если поток на счётчике 1 нулевой
           then:
-            - lambda: id(fail_set)->execute(2);         # Авария - насос неисправен/сухой ход   
+            if:
+              condition: 
+                lambda: return id(press_pump).state == 0;
+              then:
+                lambda: id(fail_set)->execute(2);         # Авария - насос неисправен/сухой ход   
+              else: 
+                lambda: id(fail_set)->execute(9);         # Авария - насос неисправен/работа в стенку
 
 #######################################################################################
 # Вычисление числа пусков насоса за последний скользящий час для индикации
@@ -809,7 +815,7 @@ script:
                 id: text_error_code
                 state: !lambda |-
                   std::string str = "";
-                  for (int i = 0; i < 8; i++)                     // Цикл по всем возможным битам ошибок
+                  for (int i = 0; i < 9; i++)                     // Цикл по всем возможным битам ошибок
                     {
                       if ((id(gs_fail_code) >> i) & 1)            // Если данный бит установлен, конкатенируем текст ошибки к общему тексту всех ошибок
                       {
@@ -822,6 +828,7 @@ script:
                           case 6: str = str + "Реле насоса не включилось | "; break;
                           case 7: str = str + "Более ${max_of_pump_starts} включений насоса за " + std::to_string((id(gs_pump_starts)[0] - id(gs_pump_starts)[${max_of_pump_starts}]) / 60000) + " мин | "; break;
                           case 8: str = str + "Реле насоса залипло | "; break;
+                          case 9: str = str + "Работа в стенку или насос неисправен | "; break;
                         }                        
                       }                      
                     }
