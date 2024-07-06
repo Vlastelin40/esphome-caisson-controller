@@ -1093,8 +1093,9 @@ text_sensor:
 #######################################################################################
 # Температурные датчики
 #######################################################################################
-dallas:
-  - pin: GPIO4
+one_wire:
+  - platform: gpio
+    pin: GPIO4
     update_interval: ${dallas_update_interval}
 
 
@@ -1166,17 +1167,17 @@ sensor:
 ######################################################################################
 # Датчики температуры
 #######################################################################################
-  - platform: dallas                # 1 - Под крышкой кесона
+  - platform: dallas_temp                # 1 - Под крышкой кесона
     name: "Under cover"
     id: t_under_cover
     unit_of_measurement: "°C"
     address: "0x5b3ca0f649249a28"
-  - platform: dallas                # 2 - Под плечами кессона
+  - platform: dallas_temp               # 2 - Под плечами кессона
     name: "Under shoulders"
     id: t_under_shoulders
     unit_of_measurement: "°C"
     address: "0x1111111111111112"
-  - platform: dallas                # 3 - Верхняя точка водопровода
+  - platform: dallas_temp                # 3 - Верхняя точка водопровода
     name: "Top water pipe"
     id: t_top_water_pipe
     unit_of_measurement: "°C"
@@ -1184,7 +1185,7 @@ sensor:
     on_value: 
       then:
         - script.execute: heater
-  - platform: dallas                # 4 - Нижняя точка водопровода
+  - platform: dallas_temp                # 4 - Нижняя точка водопровода
     name: "Bottom water pipe"
     id: t_bottom_water_pipe
     unit_of_measurement: "°C"
