@@ -59,7 +59,7 @@ template:
         {% endif %}
         
     - name: "caisson_filter_delta"
-      state: '{{ states("sensor.caisson_controller_pressure_before_filter") | float - states("sensor.caisson_controller_pressure_after_filter") | float }}'
+      state: '{{ (states("sensor.caisson_controller_pressure_before_filter") | float * 10 - states("sensor.caisson_controller_pressure_after_filter") | float * 10) | int / 10 }}'
       unit_of_measurement: бар
 
     - name: "caisson_filter_state"
