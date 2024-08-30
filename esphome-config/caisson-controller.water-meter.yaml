@@ -113,19 +113,19 @@ interval:
       if:
         condition:
           or:
-            - lambda: return millis() - id(gs_time_${wm_id}) > id(${wm_id}_pulse_width).state * 2; # Если с момента последнего импульса прошло вдвое больше времени, чем между последним и предпоследним
-            - lambda: return millis() - id(gs_time_${wm_id}) > 120000;                             # Или если с момента последнего импульса прошло более двух минут (максимальный паспортный интервал счётчика 72 секунды)
-            - lambda: return millis() < id(gs_time_${wm_id});                                      # Защита от переполнения millis (переполнение каждые 49.71 суток)
-            - lambda: return id(gs_init_time);                                                      # Если сейчас инициализация устройства
+            - lambda: return millis() - id(gs_time_${wm_id}) > id(${wm_id}_pulse_width).state * 1.5;  # Если с момента последнего импульса прошло в полтора раза больше времени, чем между последним и предпоследним
+            - lambda: return millis() - id(gs_time_${wm_id}) > 80000;                                 # Или если с момента последнего импульса прошло более 80 секунд (максимальный паспортный интервал счётчика 72 секунды)
+            - lambda: return millis() < id(gs_time_${wm_id});                                         # Защита от переполнения millis (переполнение каждые 49.71 суток)
+            - lambda: return id(gs_init_time);                                                        # Если сейчас инициализация устройства
         then:  
-          - sensor.template.publish:                                                               # Обнуляем датчик скорости потока
+          - sensor.template.publish:                                                                  # Обнуляем датчик скорости потока
               id: ${wm_id}_flow
               state: 0
-          - lambda: id(gs_time_uniform_flow_${wm_id}) = 0;                                         # Обнуляем счётчик времени неизменной скорости потока воды
-          - sensor.template.publish:                                                               # Обнуляем датчик длительности импульса
+          - lambda: id(gs_time_uniform_flow_${wm_id}) = 0;                                            # Обнуляем счётчик времени неизменной скорости потока воды
+          - sensor.template.publish:                                                                  # Обнуляем датчик длительности импульса
               id: ${wm_id}_pulse_width
               state: 0
-          - lambda: id(gs_time_zero_flow_${wm_id}) = (millis() - id(gs_time_${wm_id})) / 1000;     # Вычисляем счётчик времени отсутствия потока воды (в миллисекундах)
+          - lambda: id(gs_time_zero_flow_${wm_id}) = (millis() - id(gs_time_${wm_id})) / 1000;        # Вычисляем счётчик времени отсутствия потока воды (в миллисекундах)
 
               
 

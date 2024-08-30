@@ -44,6 +44,31 @@ std::string seconds_to_string_hms(uint32_t seconds)
   return {buffer};
 }
 
+std::string ms_to_str(uint32_t mseconds) 
+{
+  int hours = 0;
+  int minuts = 0;
+  int seconds = 0;
+  if (mseconds > 3599999) 
+  {
+    hours = trunc(mseconds / 3600000);
+    mseconds = mseconds - (hours * 3600000);
+  }
+  if (mseconds > 59999) 
+  {
+    minuts = trunc(mseconds / 60000);
+    mseconds = mseconds - (minuts * 60000);
+  }
+  if (mseconds > 999) 
+  {
+    seconds = trunc(mseconds / 1000);
+    mseconds = mseconds - (seconds * 1000);
+  }
+  char buffer[15];
+  sprintf(buffer, "%u:%02u:%02u:%03u", hours, minuts, seconds, mseconds);
+  return {buffer};
+}
+
 std::string minuts_to_string_hm(uint32_t minuts) 
 {
   int hours = 0;
